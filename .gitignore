@@ -1,0 +1,11 @@
+__pycache__/
+*.xlsx
+staff.json
+credentials.json
+.env
+.gemini/
+.agent/
+.agents/
+tp/
+tmp/
+node_modules/
