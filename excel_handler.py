@@ -262,6 +262,18 @@ def save_leave_to_excel(emp_id, emp_name, dept, leave_date, reason, approved_by,
         if sheet_name in wb.sheetnames:
             ws = wb[sheet_name]
             next_row = ws.max_row + 1
+
+            # Auto-upgrade old sheets: add missing columns if they don't exist
+            if ws.cell(row=1, column=9).value != "Leave #":
+                header_fill = PatternFill(start_color="E65100", end_color="E65100", fill_type="solid")
+                header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
+                for col_idx, h in [(9, "Leave #"), (10, "Deduction")]:
+                    cell = ws.cell(row=1, column=col_idx, value=h)
+                    cell.fill = header_fill
+                    cell.font = header_font
+                    cell.alignment = Alignment(horizontal="center", vertical="center")
+                ws.column_dimensions["I"].width = 10
+                ws.column_dimensions["J"].width = 16
         else:
             ws = wb.create_sheet(sheet_name)
             leave_headers = [
