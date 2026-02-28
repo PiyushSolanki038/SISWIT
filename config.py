@@ -1,13 +1,22 @@
 """
 Configuration for Employee Work Update Telegram Bot.
-Reads from environment variables first, falls back to hardcoded defaults.
+Reads from .env file first, then environment variables, falls back to defaults.
 Supports Railway deployment via GOOGLE_CREDS_JSON env var.
 """
 
 import os
 import json
+import logging
 
-# ─── Telegram Bot Configuration ───────────────────────────────────────────────
+# Load .env file if it exists (must be before any os.getenv calls)
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:
+    pass  # python-dotenv not installed, skip silently
+
+logger = logging.getLogger(__name__)
+
 # ─── Telegram Bot Configuration ───────────────────────────────────────────────
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
@@ -32,9 +41,12 @@ if GOOGLE_CREDS_JSON and not os.path.exists(GOOGLE_CREDS_FILE):
         creds_data = json.loads(GOOGLE_CREDS_JSON)
         with open(GOOGLE_CREDS_FILE, "w", encoding="utf-8") as f:
             json.dump(creds_data, f, indent=2)
-        print("✅ Created service_account.json from GOOGLE_CREDS_JSON env var")
+        logger.info("Created service_account.json from GOOGLE_CREDS_JSON env var")
     except (json.JSONDecodeError, IOError) as e:
-        print(f"⚠️ Failed to create service_account.json from env var: {e}")
+        logger.warning(f"Failed to create service_account.json from env var: {e}")
+
+# Detect Railway environment
+IS_RAILWAY = bool(os.getenv("RAILWAY_ENVIRONMENT", ""))
 
 # ─── Timezone ────────────────────────────────────────────────────────────────
 TIMEZONE = os.getenv("TIMEZONE", "Asia/Kolkata")
@@ -50,7 +62,7 @@ def load_staff_records():
             with open(STAFF_JSON_FILE, "r", encoding="utf-8") as f:
                 return json.load(f)
         except Exception as e:
-            print(f"⚠️ Error loading {STAFF_JSON_FILE}: {e}")
+            logger.warning(f"Error loading {STAFF_JSON_FILE}: {e}")
     
     # Defaults if file doesn't exist
     return {
@@ -72,8 +84,44 @@ def save_staff_record(emp_id, name, dept):
             json.dump(records, f, indent=4)
         return True
     except Exception as e:
-        print(f"⚠️ Error saving {STAFF_JSON_FILE}: {e}")
+        logger.warning(f"Error saving {STAFF_JSON_FILE}: {e}")
+        return False
+
+def remove_staff_record(emp_id):
+    """Remove a staff record from staff.json."""
+    records = load_staff_records()
+    emp_id = emp_id.upper()
+    if emp_id not in records:
+        return False
+    del records[emp_id]
+    try:
+        with open(STAFF_JSON_FILE, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=4)
+        return True
+    except Exception as e:
+        logger.warning(f"Error saving {STAFF_JSON_FILE}: {e}")
         return False
 
 # Load records on startup
 STAFF_RECORDS = load_staff_records()
+
+# ─── Daily Log Persistence ───────────────────────────────────────────────────
+DAILY_LOG_FILE = "daily_log.json"
+
+def load_daily_log():
+    """Load daily submission log from daily_log.json."""
+    if os.path.exists(DAILY_LOG_FILE):
+        try:
+            with open(DAILY_LOG_FILE, "r", encoding="utf-8") as f:
+                return json.load(f)
+        except Exception as e:
+            logger.warning(f"Error loading {DAILY_LOG_FILE}: {e}")
+    return {}
+
+def save_daily_log(log_data):
+    """Save daily submission log to daily_log.json."""
+    try:
+        with open(DAILY_LOG_FILE, "w", encoding="utf-8") as f:
+            json.dump(log_data, f, indent=2)
+    except Exception as e:
+        logger.warning(f"Error saving {DAILY_LOG_FILE}: {e}")

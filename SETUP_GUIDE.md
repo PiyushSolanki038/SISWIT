@@ -49,14 +49,24 @@ pip install -r requirements.txt
 ```
 
 ### 4.3 Set Your Configuration
-Open `config.py` and replace the defaults:
-```python
-BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"    # ← Paste token from BotFather
-OWNER_CHAT_ID = "923456789"          # ← Your Chat ID
-HR_CHAT_ID = "987654321"             # ← HR's Chat ID
+
+**Option A: Using `.env` file (Recommended)**
+
+Copy the example file and fill in your values:
+```bash
+# Copy the template
+copy .env.example .env
 ```
 
-Or use environment variables (recommended):
+Then open `.env` and paste your values:
+```env
+BOT_TOKEN=7123456789:AAH...
+OWNER_CHAT_ID=923456789
+HR_CHAT_ID=987654321
+GOOGLE_SHEET_ID=your_sheet_id_here
+```
+
+**Option B: Using environment variables**
 ```bash
 # Windows (Command Prompt)
 set BOT_TOKEN=7123456789:AAH...
@@ -81,21 +91,23 @@ python bot.py
 
 You should see:
 ```
-  🤖 Employee Work Update Bot
-  📋 Format: EMP_ID - DEPT - Work description
-  🟢 Bot is running... Press Ctrl+C to stop
+  Employee Work Update Bot — Starting
+  Bot is running... Press Ctrl+C to stop
 ```
 
 ### 4.5 Test It
 Go to your Telegram group and send:
 ```
-PK042 - SALES - Aaj maine 3 client calls ki aur 2 deals close ki
+DEV01 Aaj maine 3 client calls ki aur 2 deals close ki
 ```
 
 The bot will:
 - ✅ Reply in the group with confirmation
 - 📊 Save to `employee_updates.xlsx`
+- 📋 Save to Google Sheets (if configured)
 - 📩 Send notifications to Owner & HR
+
+> ⚠️ The Employee ID must be registered. Use `/staff` to see registered IDs or `/addstaff` to add new ones.
 
 ---
 
@@ -119,7 +131,7 @@ The bot will:
 4. Skip the optional steps → **Done**
 5. Click on the service account you just created
 6. Go to **Keys** tab → **Add Key** → **Create New Key** → **JSON**
-7. A `.json` file downloads — rename it to `service_account.json`
+7. A `.json` file downloads — rename it to `credentials.json`
 8. Place it in the same folder as `bot.py`
 
 ### 5.4 Create and Share Google Sheet
@@ -129,17 +141,12 @@ The bot will:
    ```
    https://docs.google.com/spreadsheets/d/SHEET_ID_IS_HERE/edit
    ```
-4. Click **Share** → paste the service account email (found in `service_account.json` under `client_email`) → **Editor** → **Share**
+4. Click **Share** → paste the service account email (found in `credentials.json` under `client_email`) → **Editor** → **Share**
 
 ### 5.5 Configure Sheet ID
-In `config.py`, set:
-```python
-GOOGLE_SHEET_ID = "your_sheet_id_here"
-```
-
-Or as env variable:
-```bash
-set GOOGLE_SHEET_ID=your_sheet_id_here
+In your `.env` file, set:
+```env
+GOOGLE_SHEET_ID=your_sheet_id_here
 ```
 
 ---
@@ -157,7 +164,7 @@ set GOOGLE_SHEET_ID=your_sheet_id_here
    git push -u origin main
    ```
 
-> ⚠️ Do NOT push `service_account.json` to GitHub! Add it to `.gitignore`.
+> ⚠️ Do NOT push `credentials.json` or `.env` to GitHub! They are already in `.gitignore`.
 
 ### 6.2 Deploy on Railway
 1. Go to [railway.app](https://railway.app/) → Sign in with GitHub
@@ -174,9 +181,11 @@ Go to your Railway project → **Variables** tab → Add these:
 | `OWNER_CHAT_ID` | Your Chat ID |
 | `HR_CHAT_ID` | HR's Chat ID |
 | `GOOGLE_SHEET_ID` | Your Google Sheet ID (or leave empty) |
-| `GOOGLE_CREDS_JSON` | Full contents of `service_account.json` |
+| `GOOGLE_CREDS_JSON` | Full contents of `credentials.json` |
 
-> 💡 For `GOOGLE_CREDS_JSON`, open `service_account.json`, copy **all** the text, and paste it as the value. The bot will automatically create the file on Railway.
+> 💡 For `GOOGLE_CREDS_JSON`, open `credentials.json`, copy **all** the text, and paste it as the value. The bot will automatically create the file on Railway.
+
+> ⚠️ **Note:** Excel files are **not persistent** on Railway. They get deleted on every deploy. Use Google Sheets for reliable storage in cloud deployments.
 
 ### 6.4 Deploy
 Click **Deploy** — Railway will install dependencies and start the bot!
@@ -187,22 +196,21 @@ Click **Deploy** — Railway will install dependencies and start the bot!
 
 Employees send updates in this format:
 ```
-EMPLOYEE_ID - DEPARTMENT - Work description here
+EMPLOYEE_ID Work description here
 ```
 
 **Examples:**
 ```
-PK042 - SALES - Aaj maine 3 client calls ki aur 2 deals close ki
-EMP001 - IT - Fixed server issues and deployed new update
-HR003 - HR - Conducted 5 interviews for developer position
-MKT007 - MARKETING - Created social media campaign for product launch
+DEV01 Fixed the login page and deployed to staging
+MKT01 Created social media campaign for product launch
+FIN01 Prepared monthly financial report
+DEV02 Reviewed PRs and fixed 3 critical bugs
 ```
 
 **Rules:**
-- Employee ID can be letters + numbers (e.g., PK042, EMP001, A1)
-- Department can be letters + numbers + spaces (e.g., SALES, IT SUPPORT)
-- Separated by ` - ` (space-dash-space)
-- Work description is everything after the second dash
+- Employee ID must be **registered** (use `/staff` to check)
+- Messages from unregistered IDs are silently ignored
+- Only **one submission per day** per employee
 - All other messages are silently ignored
 
 ---
@@ -212,11 +220,13 @@ MKT007 - MARKETING - Created social media campaign for product launch
 | Problem | Solution |
 |---------|----------|
 | Bot doesn't respond | Make sure bot is admin in the group |
+| "Hello everyone" triggers bot | Update to latest version — only registered IDs are processed now |
 | Excel not saving | Check file permissions in the folder |
 | Google Sheets error | Verify Sheet ID and service account sharing |
 | Notifications not received | Double-check Chat IDs with @userinfobot |
 | Bot token error | Re-copy token from @BotFather |
 | Railway deployment fails | Check logs in Railway dashboard |
+| Duplicate guard resets | Check that `daily_log.json` exists and is writable |
 
 ---
 
@@ -224,10 +234,17 @@ MKT007 - MARKETING - Created social media campaign for product launch
 
 ```
 telegram/
-├── bot.py              # Main bot logic
-├── config.py           # Configuration (env vars + defaults)
-├── requirements.txt    # Python dependencies
-├── Procfile            # Railway deployment config
-├── SETUP_GUIDE.md      # This file
-└── service_account.json # Google credentials (not in git)
+├── bot.py                # Main bot logic
+├── config.py             # Configuration (env vars + defaults)
+├── requirements.txt      # Python dependencies
+├── .env.example          # Template for environment variables
+├── .env                  # Your actual config (not in git)
+├── Procfile              # Railway deployment config
+├── staff.json            # Staff records (auto-created)
+├── daily_log.json        # Daily submission tracking (auto-created)
+├── employee_updates.xlsx # Excel data file (auto-created)
+├── credentials.json      # Google credentials (not in git)
+├── BOT_DOCUMENTATION.md  # User documentation
+├── SETUP_GUIDE.md        # This file
+└── .gitignore            # Git ignore rules
 ```

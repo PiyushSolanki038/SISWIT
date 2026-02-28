@@ -3,3 +3,4 @@ openpyxl==3.1.2
 gspread==6.0.2
 google-auth==2.28.0
 pytz
+python-dotenv==1.0.1
