@@ -44,7 +44,7 @@ To submit your work, enter your message in the following format:
 | **`/staff`** | Shows the list of registered employees. |
 | **`/addstaff`** | Adds a new employee (e.g., `/addstaff ID - Name - Dept`). |
 | **`/removestaff`** | Removes an employee (e.g., `/removestaff DEV01`). |
-| **`/allow`** | When used by admin, directly approves re-submission (no buttons). |
+| **`/allow`** | When used by admin, directly sends approval notifications to both Owner & HR. |
 | **`/report`** | Shows today's submission status — who submitted and who hasn't. |
 
 ---
@@ -61,8 +61,6 @@ To keep the records clean, the bot only allows **one submission per employee per
 2. **Owner & HR** receive a private message with **✅ Approve** and **❌ Reject** buttons
 3. If **approved** → bot notifies the group and the employee can submit again
 4. If **rejected** → bot notifies the group that the request was denied
-
-> 💡 **Admin shortcut:** If Owner or HR uses `/allow DEV01` themselves, it's approved instantly — no buttons needed.
 
 ## ⚡ 5. Features & Automation
 
