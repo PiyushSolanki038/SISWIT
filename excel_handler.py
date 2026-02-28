@@ -64,6 +64,22 @@ def save_to_excel(data: dict) -> bool:
         if month_name in wb.sheetnames:
             ws = wb[month_name]
             next_row = ws.max_row + 1
+
+            # Check if new day → insert separator row
+            last_date = ws.cell(row=next_row - 1, column=6).value  # Date column
+            current_date = data["date"]
+            if last_date and str(last_date) != str(current_date):
+                # Insert a day-separator row
+                sep_fill = PatternFill(start_color="D6E4F0", end_color="D6E4F0", fill_type="solid")
+                sep_font = Font(name="Arial", size=10, bold=True, color="1B3A5C")
+                ws.merge_cells(start_row=next_row, start_column=1, end_row=next_row, end_column=12)
+                sep_cell = ws.cell(row=next_row, column=1,
+                                  value=f"📅 {current_date} — {data['day']}")
+                sep_cell.fill = sep_fill
+                sep_cell.font = sep_font
+                sep_cell.alignment = Alignment(horizontal="center", vertical="center")
+                next_row += 1
+
             sr_no = next_row - 1
         else:
             ws = wb.create_sheet(month_name, 0)
@@ -368,6 +384,26 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
 
         existing = sheet.get_all_values()
         sr_no = len(existing) if existing else 1
+
+        # Check if new day → insert separator row
+        if len(existing) > 1:
+            last_date = existing[-1][5] if len(existing[-1]) > 5 else ""  # Date column (index 5)
+            current_date = data["date"]
+            if last_date and last_date != current_date and last_date != "Date":
+                # Insert a day-separator row
+                sep_row = [f"📅 {current_date} — {data['day']}", "", "", "", "", "", "", "", "", "", "", ""]
+                sheet.append_row(sep_row)
+                # Format separator row
+                sep_row_num = len(sheet.get_all_values())
+                sheet.format(f"A{sep_row_num}:L{sep_row_num}", {
+                    "backgroundColor": {"red": 0.839, "green": 0.894, "blue": 0.941},
+                    "textFormat": {"bold": True, "fontSize": 10,
+                                  "foregroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361}},
+                    "horizontalAlignment": "CENTER",
+                })
+                # Merge the separator cells
+                sheet.merge_cells(f"A{sep_row_num}:L{sep_row_num}")
+                sr_no += 1
 
         row = [
             sr_no, data["emp_id"], data["department"], data["emp_name"],
