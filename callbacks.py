@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 import config
-from excel_handler import save_leave_to_excel, count_monthly_leaves
+from excel_handler import save_leave_to_excel, save_leave_to_google_sheets, count_monthly_leaves
 
 logger = logging.getLogger(__name__)
 
@@ -192,6 +192,9 @@ async def leave_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Save to Excel Leave Register (with deduction if > 3)
         save_leave_to_excel(emp_id, staff_name, dept, leave_date, reason, admin_name, leave_count)
+
+        # Save to Google Sheets Leave Register
+        await save_leave_to_google_sheets(emp_id, staff_name, dept, leave_date, reason, admin_name, leave_count)
 
         # Admin message — shows deduction info privately
         admin_msg = (

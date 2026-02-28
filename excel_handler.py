@@ -392,3 +392,98 @@ async def save_to_google_sheets(data: dict) -> bool:
     except Exception as e:
         logger.error(f"Google Sheets async wrapper failed: {e}", exc_info=True)
         return False
+
+
+def _save_leave_to_google_sheets_sync(emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count):
+    """Save leave entry to Google Sheets Leave Register (synchronous)."""
+    if not config.GOOGLE_SHEET_ID:
+        return False
+
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+
+        creds = Credentials.from_service_account_file(config.GOOGLE_CREDS_FILE, scopes=scopes)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
+
+        sheet_name = "Leave Register"
+        leave_headers = [
+            "Sr No", "Employee ID", "Name", "Department",
+            "Leave Date", "Reason", "Approved By", "Status",
+            "Leave #", "Deduction",
+        ]
+
+        # Get or create Leave Register sheet
+        try:
+            sheet = spreadsheet.worksheet(sheet_name)
+        except gspread.exceptions.WorksheetNotFound:
+            sheet = spreadsheet.add_worksheet(title=sheet_name, rows=500, cols=10)
+            sheet.append_row(leave_headers)
+            # Format header
+            sheet.format("A1:J1", {
+                "backgroundColor": {"red": 0.902, "green": 0.318, "blue": 0.0},
+                "textFormat": {
+                    "foregroundColor": {"red": 1, "green": 1, "blue": 1},
+                    "bold": True, "fontSize": 11,
+                },
+                "horizontalAlignment": "CENTER",
+            })
+            sheet.freeze(rows=1)
+
+        # Calculate deduction
+        is_extra = leave_count > 3
+        deduction = f"-₹{(leave_count - 3) * 500}" if is_extra else "—"
+        status = "⚠️ Extra Leave" if is_extra else "✅ Approved"
+
+        existing = sheet.get_all_values()
+        sr_no = len(existing) if existing else 1
+
+        row = [
+            sr_no, emp_id, emp_name, dept, leave_date,
+            reason, approved_by, status, leave_count, deduction,
+        ]
+
+        sheet.append_row(row)
+
+        # Color the deduction cell red if extra leave
+        if is_extra:
+            row_num = len(sheet.get_all_values())
+            # Color deduction cell red
+            sheet.format(f"J{row_num}", {
+                "textFormat": {
+                    "foregroundColor": {"red": 0.86, "green": 0.08, "blue": 0.24},
+                    "bold": True,
+                },
+                "backgroundColor": {"red": 1, "green": 0.88, "blue": 0.88},
+            })
+            # Color status cell red
+            sheet.format(f"H{row_num}", {
+                "textFormat": {
+                    "foregroundColor": {"red": 0.86, "green": 0.08, "blue": 0.24},
+                },
+            })
+
+        logger.info(f"Google Sheets: Leave #{leave_count} saved for {emp_id}")
+        return True
+
+    except Exception as e:
+        logger.error(f"Google Sheets leave save failed: {e}", exc_info=True)
+        return False
+
+
+async def save_leave_to_google_sheets(emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count):
+    """Save leave to Google Sheets in a background thread (non-blocking)."""
+    try:
+        return await asyncio.to_thread(
+            _save_leave_to_google_sheets_sync,
+            emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count
+        )
+    except Exception as e:
+        logger.error(f"Google Sheets leave async failed: {e}", exc_info=True)
+        return False
