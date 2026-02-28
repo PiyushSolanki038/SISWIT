@@ -7,17 +7,24 @@ Saves to Excel (local) + Google Sheets, sends notifications to Owner & HR.
 Uses python-telegram-bot v21 API (ApplicationBuilder).
 """
 
-import re
-import os
-import asyncio
 import logging
 from datetime import datetime
 
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
+from telegram.ext import (
+    ApplicationBuilder, CommandHandler, MessageHandler,
+    CallbackQueryHandler, ContextTypes, filters,
+)
 
 import config
+from excel_handler import save_to_excel, save_to_google_sheets
+from commands_employee import mystatus_command, myprofile_command, edit_command, leave_command
+from commands_admin import (
+    absent_command, late_command, history_command, weeklyreport_command,
+    monthly_command, export_command, broadcast_command, deadline_command, sethr_command,
+)
+from callbacks import allow_callback, edit_callback, leave_callback
 
 # ─── Logging ─────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -26,194 +33,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# ─── Regex Pattern ───────────────────────────────────────────────────────────
-# Matches: EMP_ID Work description
-# EMP_ID: alphanumeric (e.g., PK01, DEV01)
-# Work: everything after the first space
-UPDATE_PATTERN = re.compile(
-    r"^([A-Za-z0-9]+)\s+(.+)$",
-    re.DOTALL,
-)
-
-
-# ─── Excel Functions ─────────────────────────────────────────────────────────
-def save_to_excel(data: dict) -> bool:
-    """Save the update to a professionally formatted Excel file."""
-    try:
-        from openpyxl import Workbook, load_workbook
-        from openpyxl.styles import Font, PatternFill, Alignment, Border, Side
-
-        headers = [
-            "Sr No", "Employee ID", "Department", "Employee Name",
-            "Telegram Username", "Date", "Day", "Time",
-            "Work Update", "Group Name",
-        ]
-
-        file_path = config.EXCEL_FILE
-
-        if os.path.exists(file_path):
-            wb = load_workbook(file_path)
-            ws = wb.active
-            next_row = ws.max_row + 1
-            sr_no = next_row - 1  # subtract header row
-        else:
-            wb = Workbook()
-            ws = wb.active
-            ws.title = "Employee Updates"
-
-            # ── Header styling ──
-            header_fill = PatternFill(start_color="1B3A5C", end_color="1B3A5C", fill_type="solid")
-            header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
-            header_alignment = Alignment(horizontal="center", vertical="center", wrap_text=True)
-            thin_border = Border(
-                left=Side(style="thin", color="B0B0B0"),
-                right=Side(style="thin", color="B0B0B0"),
-                top=Side(style="thin", color="B0B0B0"),
-                bottom=Side(style="thin", color="B0B0B0"),
-            )
-
-            for col_idx, header in enumerate(headers, 1):
-                cell = ws.cell(row=1, column=col_idx, value=header)
-                cell.fill = header_fill
-                cell.font = header_font
-                cell.alignment = header_alignment
-                cell.border = thin_border
-
-            # Column widths
-            col_widths = [8, 15, 15, 20, 20, 14, 12, 10, 50, 25]
-            for i, width in enumerate(col_widths, 1):
-                ws.column_dimensions[chr(64 + i)].width = width
-
-            # Freeze header row
-            ws.freeze_panes = "A2"
-
-            # Auto-filter
-            ws.auto_filter.ref = f"A1:J1"
-
-            next_row = 2
-            sr_no = 1
-
-        # ── Write data row ──
-        row_data = [
-            sr_no,
-            data["emp_id"],
-            data["department"],
-            data["emp_name"],
-            data["username"],
-            data["date"],
-            data["day"],
-            data["time"],
-            data["work_update"],
-            data["group_name"],
-        ]
-
-        # Alternating row colors
-        if sr_no % 2 == 0:
-            row_fill = PatternFill(start_color="E8F0FE", end_color="E8F0FE", fill_type="solid")
-        else:
-            row_fill = PatternFill(start_color="FFFFFF", end_color="FFFFFF", fill_type="solid")
-
-        data_font = Font(name="Arial", size=10)
-        data_alignment = Alignment(vertical="center", wrap_text=True)
-        thin_border = Border(
-            left=Side(style="thin", color="D0D0D0"),
-            right=Side(style="thin", color="D0D0D0"),
-            top=Side(style="thin", color="D0D0D0"),
-            bottom=Side(style="thin", color="D0D0D0"),
-        )
-
-        for col_idx, value in enumerate(row_data, 1):
-            cell = ws.cell(row=next_row, column=col_idx, value=value)
-            cell.fill = row_fill
-            cell.font = data_font
-            cell.alignment = data_alignment
-            cell.border = thin_border
-
-        # Center-align Sr No, Date, Day, Time columns
-        for col in [1, 6, 7, 8]:
-            ws.cell(row=next_row, column=col).alignment = Alignment(
-                horizontal="center", vertical="center"
-            )
-
-        wb.save(file_path)
-        logger.info(f"Excel: Saved update #{sr_no} to {file_path}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Excel save failed: {e}", exc_info=True)
-        return False
-
-
-# ─── Google Sheets Functions ─────────────────────────────────────────────────
-def _save_to_google_sheets_sync(data: dict) -> bool:
-    """Synchronous Google Sheets save (runs in a thread)."""
-    if not config.GOOGLE_SHEET_ID:
-        return False
-
-    try:
-        import gspread
-        from google.oauth2.service_account import Credentials
-
-        scopes = [
-            "https://www.googleapis.com/auth/spreadsheets",
-            "https://www.googleapis.com/auth/drive",
-        ]
-
-        creds = Credentials.from_service_account_file(config.GOOGLE_CREDS_FILE, scopes=scopes)
-        client = gspread.authorize(creds)
-        sheet = client.open_by_key(config.GOOGLE_SHEET_ID).sheet1
-
-        # Check if headers exist
-        existing = sheet.get_all_values()
-        headers = [
-            "Sr No", "Employee ID", "Department", "Employee Name",
-            "Telegram Username", "Date", "Day", "Time",
-            "Work Update", "Group Name",
-        ]
-
-        if not existing:
-            sheet.append_row(headers)
-            sr_no = 1
-        else:
-            sr_no = len(existing)  # rows minus header = count, +1 for new = len
-
-        row = [
-            sr_no,
-            data["emp_id"],
-            data["department"],
-            data["emp_name"],
-            data["username"],
-            data["date"],
-            data["day"],
-            data["time"],
-            data["work_update"],
-            data["group_name"],
-        ]
-
-        sheet.append_row(row)
-        logger.info(f"Google Sheets: Saved update #{sr_no}")
-        return True
-
-    except Exception as e:
-        logger.error(f"Google Sheets save failed: {e}", exc_info=True)
-        return False
-
-
-async def save_to_google_sheets(data: dict) -> bool:
-    """Save to Google Sheets in a background thread (non-blocking)."""
-    try:
-        return await asyncio.to_thread(_save_to_google_sheets_sync, data)
-    except Exception as e:
-        logger.error(f"Google Sheets async wrapper failed: {e}", exc_info=True)
-        return False
-
 
 # ─── Notification Functions ──────────────────────────────────────────────────
 async def send_personal_notification(bot, chat_id: str, data: dict, label: str):
     """Send a personal notification to Owner or HR."""
     if not chat_id:
         return
-
     try:
         message = (
             f"📬 *New Work Update Received*\n"
@@ -227,146 +52,121 @@ async def send_personal_notification(bot, chat_id: str, data: dict, label: str):
             f"━━━━━━━━━━━━━━━━━━━━━━\n"
             f"📍 *Group:* {data['group_name']}"
         )
-        await bot.send_message(
-            chat_id=int(chat_id),
-            text=message,
-            parse_mode="Markdown",
-        )
-        logger.info(f"Notification sent to {label} (Chat ID: {chat_id})")
-
+        await bot.send_message(chat_id=int(chat_id), text=message, parse_mode="Markdown")
+        logger.info(f"Notification sent to {label}")
     except Exception as e:
         logger.warning(f"Failed to notify {label}: {e}")
 
 
-# ─── Command Handlers ────────────────────────────────────────────────────────
+# ─── Basic Commands ─────────────────────────────────────────────────────────
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Welcome message for /start."""
-    message = (
+    """Welcome message."""
+    msg = (
         "👋 *Welcome to the Employee Work Update Bot!*\n\n"
-        "📝 *How to submit your daily update:*\n"
+        "📝 *Submit your daily update:*\n"
         "`YOUR_ID Your work description`\n\n"
         "📌 *Example:*\n"
         "`DEV01 Fixed the login page and tested it`\n\n"
         "💡 Use /help to see all commands."
     )
-    await update.message.reply_text(message, parse_mode="Markdown")
-    logger.info(f"Start command used by {update.effective_user.id}")
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display all available commands and usage."""
+    """Display all commands based on role."""
     user_id = str(update.effective_user.id)
     is_admin = user_id in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]
 
-    message = (
-        "📖 *Bot Help & Commands*\n"
-        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
-        "📝 *Submit Your Update:*\n"
-        "`YOUR_ID Your work description`\n\n"
-        "📌 *Example:*\n"
-        "`DEV01 Completed API integration and unit tests`\n\n"
-        "⚠️ *Rules:*\n"
-        "• Your Employee ID must be registered\n"
-        "• Only one submission per day\n"
-        "• Contact admin if you need to re-submit\n\n"
-        "🔧 *Commands:*\n"
+    msg = (
+        "📖 *Bot Commands*\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "📝 *Submit Update:* `YOUR_ID Work description`\n\n"
+        "🔧 *Everyone:*\n"
         "• /start — Welcome message\n"
-        "• /help — This help menu\n"
+        "• /help — This menu\n"
+        "• /allow `ID` — Request re-submission\n"
+        "• /mystatus `ID` — Your weekly status (DM)\n"
+        "• /myprofile `ID` — Your profile info (DM)\n"
+        "• /edit `ID New text` — Request edit (needs approval)\n"
+        "• /leave `ID DD-MM-YYYY Reason` — Request leave\n"
     )
 
     if is_admin:
-        message += (
-            "\n👑 *Admin Commands:*\n"
-            "• /staff — View all registered employees\n"
-            "• /addstaff `ID - Name - Dept` — Add employee\n"
-            "• /removestaff `ID` — Remove employee\n"
-            "• /allow `ID` — Allow re-submission today\n"
-            "• /report — Today's submission status\n"
+        msg += (
+            "\n👑 *Admin:*\n"
+            "• /staff — List all employees\n"
+            "• /addstaff `ID - Name - Dept`\n"
+            "• /removestaff `ID`\n"
+            "• /report — Today's full status\n"
+            "• /absent — Quick absent list\n"
+            "• /late — Late submissions\n"
+            "• /history `ID` — Employee 7-day history (DM)\n"
+            "• /weeklyreport — Weekly grid (DM)\n"
+            "• /monthly — Monthly attendance (DM)\n"
+            "• /export — Get Excel file / Sheet link (DM)\n"
+            "• /broadcast `Text` — Send announcement\n"
+            "• /deadline `HH:MM` — Set submission deadline\n"
         )
+        if user_id == str(config.OWNER_CHAT_ID):
+            msg += "• /sethr `CHAT_ID` — Change HR\n"
 
-    await update.message.reply_text(message, parse_mode="Markdown")
-    logger.info(f"Help command used by {update.effective_user.id}")
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def staff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Display the list of registered staff members and instructions (Owner/HR only)."""
+    """Display registered staff list (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    
-    # Check if user is Owner or HR
     if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        await update.message.reply_text("🚫 *Permission Denied:* Only the Owner and HR can use this command.", parse_mode="Markdown")
-        logger.warning(f"Unauthorized attempt by {user_id} to access /staff")
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
     if not config.STAFF_RECORDS:
         await update.message.reply_text("📋 No staff records configured.")
         return
 
-    message = "👥 *Registered Staff & Attendance Format*\n"
-    message += "━━━━━━━━━━━━━━━━━━━━━━\n"
-    message += "Use the following ID for your daily updates:\n\n"
-    
+    msg = "👥 *Registered Staff*\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
     for emp_id, info in config.STAFF_RECORDS.items():
-        message += f"• `{emp_id}` — {info['name']} ({info['dept']})\n"
-    
-    message += "\n📝 *Update Format:*\n"
-    message += "`ID Your work description`"
-    
-    await update.message.reply_text(message, parse_mode="Markdown")
-    logger.info("Staff list shared")
+        msg += f"• `{emp_id}` — {info['name']} ({info['dept']})\n"
+    msg += f"\n📊 Total: {len(config.STAFF_RECORDS)} employees"
+
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
 
 async def addstaff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Dynamically add a new staff member (Owner/HR only)."""
+    """Add a new staff member (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    
-    # Check if user is Owner or HR
     if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        await update.message.reply_text("🚫 *Permission Denied:* Only the Owner and HR can add staff.", parse_mode="Markdown")
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
-    # Expected: /addstaff ID - Name - Dept
     args = " ".join(context.args)
     if not args:
         await update.message.reply_text("❗ *Usage:* `/addstaff ID - Name - Department`", parse_mode="Markdown")
         return
 
     try:
-        # Simple split by dash
         parts = [p.strip() for p in args.split("-")]
         if len(parts) != 3:
-            raise ValueError("Invalid format")
-        
+            raise ValueError
         emp_id, name, dept = parts
-        
-        # Save to file
-        success = config.save_staff_record(emp_id, name, dept)
-        
-        if success:
-            # Refresh in-memory records
+
+        if config.save_staff_record(emp_id, name, dept):
             config.STAFF_RECORDS = config.load_staff_records()
             await update.message.reply_text(
-                f"✅ *Staff Added Successfully!*\n\n"
-                f"🆔 *ID:* `{emp_id.upper()}`\n"
-                f"👤 *Name:* {name}\n"
-                f"🏢 *Dept:* {dept.upper()}",
-                parse_mode="Markdown"
+                f"✅ *Staff Added!*\n🆔 `{emp_id.upper()}` | 👤 {name} | 🏢 {dept.upper()}",
+                parse_mode="Markdown",
             )
-            logger.info(f"Added new staff: {emp_id} - {name}")
+            logger.info(f"Added staff: {emp_id}")
         else:
-            await update.message.reply_text("❌ *Error:* Failed to save staff record.", parse_mode="Markdown")
-
+            await update.message.reply_text("❌ Failed to save.", parse_mode="Markdown")
     except Exception:
-        await update.message.reply_text("❗ *Format error:* Use `/addstaff ID - Name - Department`", parse_mode="Markdown")
+        await update.message.reply_text("❗ Use `/addstaff ID - Name - Department`", parse_mode="Markdown")
 
 
 async def removestaff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a staff member (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    
-    # Check if user is Owner or HR
     if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        await update.message.reply_text("🚫 *Permission Denied:* Only the Owner and HR can remove staff.", parse_mode="Markdown")
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
     if not context.args:
@@ -374,138 +174,168 @@ async def removestaff_command(update: Update, context: ContextTypes.DEFAULT_TYPE
         return
 
     emp_id = context.args[0].upper()
-    
-    # Check if employee exists
     if emp_id not in config.STAFF_RECORDS:
-        await update.message.reply_text(f"❌ Employee `{emp_id}` not found in records.", parse_mode="Markdown")
+        await update.message.reply_text(f"❌ `{emp_id}` not found.", parse_mode="Markdown")
         return
 
-    staff_name = config.STAFF_RECORDS[emp_id]["name"]
-    success = config.remove_staff_record(emp_id)
-    
-    if success:
-        # Refresh in-memory records
+    name = config.STAFF_RECORDS[emp_id]["name"]
+    if config.remove_staff_record(emp_id):
         config.STAFF_RECORDS = config.load_staff_records()
-        await update.message.reply_text(
-            f"✅ *Staff Removed Successfully!*\n\n"
-            f"🆔 *ID:* `{emp_id}`\n"
-            f"👤 *Name:* {staff_name}",
-            parse_mode="Markdown"
-        )
-        logger.info(f"Removed staff: {emp_id} - {staff_name}")
+        await update.message.reply_text(f"✅ *Removed:* `{emp_id}` ({name})", parse_mode="Markdown")
+        logger.info(f"Removed staff: {emp_id}")
     else:
-        await update.message.reply_text("❌ *Error:* Failed to remove staff record.", parse_mode="Markdown")
+        await update.message.reply_text("❌ Failed to remove.", parse_mode="Markdown")
 
 
 async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show today's submission status (Owner/HR only)."""
+    """Today's full submission status (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    
-    # Check if user is Owner or HR
     if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        await update.message.reply_text("🚫 *Permission Denied:* Only the Owner and HR can view reports.", parse_mode="Markdown")
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.now(tz)
     today_str = now.strftime("%Y-%m-%d")
 
-    # Get daily log
     if "daily_log" not in context.bot_data:
         context.bot_data["daily_log"] = config.load_daily_log()
 
     today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
-    
-    submitted = []
-    not_submitted = []
-    
+    leave_log = config.load_leave_log()
+    today_leaves = leave_log.get(today_str, {})
+
+    submitted, not_submitted, on_leave = [], [], []
+
     for emp_id, info in config.STAFF_RECORDS.items():
         if emp_id in today_log:
             submitted.append(f"✅ `{emp_id}` — {info['name']}")
+        elif emp_id in today_leaves:
+            on_leave.append(f"🏖️ `{emp_id}` — {info['name']}")
         else:
             not_submitted.append(f"❌ `{emp_id}` — {info['name']}")
 
     total = len(config.STAFF_RECORDS)
     done = len(submitted)
 
-    message = (
-        f"📊 *Daily Report — {now.strftime('%d %b %Y')}*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"📈 *Progress:* {done}/{total} submitted\n\n"
-    )
+    msg = f"📊 *Daily Report — {now.strftime('%d %b %Y')}*\n━━━━━━━━━━━━━━━━━━━━━━\n"
+    msg += f"📈 *Progress:* {done}/{total} submitted\n\n"
 
     if submitted:
-        message += "*✅ Submitted:*\n"
-        message += "\n".join(submitted)
-        message += "\n\n"
-
+        msg += "*✅ Submitted:*\n" + "\n".join(submitted) + "\n\n"
+    if on_leave:
+        msg += "*🏖️ On Leave:*\n" + "\n".join(on_leave) + "\n\n"
     if not_submitted:
-        message += "*❌ Not Submitted:*\n"
-        message += "\n".join(not_submitted)
+        msg += "*❌ Not Submitted:*\n" + "\n".join(not_submitted)
 
-    if not submitted and not not_submitted:
-        message += "No staff records found."
+    await update.message.reply_text(msg, parse_mode="Markdown")
 
-    await update.message.reply_text(message, parse_mode="Markdown")
-    logger.info(f"Report generated: {done}/{total} submitted")
+
+async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Request re-submission (sends approval to Owner & HR)."""
+    if not context.args:
+        await update.message.reply_text("❗ *Usage:* `/allow EMP_ID`", parse_mode="Markdown")
+        return
+
+    emp_id = context.args[0].upper()
+    requester = update.effective_user
+    requester_name = requester.first_name or "Unknown"
+
+    if emp_id not in config.STAFF_RECORDS:
+        await update.message.reply_text(f"❌ `{emp_id}` is not registered.", parse_mode="Markdown")
+        return
+
+    tz = pytz.timezone(config.TIMEZONE)
+    now = datetime.now(tz)
+    today_str = now.strftime("%Y-%m-%d")
+
+    if "daily_log" not in context.bot_data:
+        context.bot_data["daily_log"] = config.load_daily_log()
+
+    today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
+    if emp_id not in today_log:
+        await update.message.reply_text(f"ℹ️ `{emp_id}` has not submitted today — no need to allow.", parse_mode="Markdown")
+        return
+
+    staff_name = config.STAFF_RECORDS[emp_id]["name"]
+    group_name = update.message.chat.title or "Private Chat"
+    chat_id = str(update.message.chat.id)
+
+    approval_msg = (
+        f"🔔 *Re-submission Request*\n━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 *By:* {requester_name}\n"
+        f"🆔 *Employee:* {staff_name} (`{emp_id}`)\n"
+        f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
+        f"📍 *Group:* {group_name}\n\nApprove re-submission?"
+    )
+
+    keyboard = InlineKeyboardMarkup([[
+        InlineKeyboardButton("✅ Approve", callback_data=f"allow_approve:{emp_id}:{requester.id}:{chat_id}"),
+        InlineKeyboardButton("❌ Reject", callback_data=f"allow_reject:{emp_id}:{requester.id}:{chat_id}"),
+    ]])
+
+    for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+        if admin_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(admin_id), text=approval_msg,
+                    parse_mode="Markdown", reply_markup=keyboard,
+                )
+            except Exception as e:
+                logger.warning(f"Failed to send to {admin_id}: {e}")
+
+    await update.message.reply_text(f"📨 Request sent to Owner & HR for `{emp_id}`.", parse_mode="Markdown")
+    logger.info(f"Allow request for {emp_id} by {requester_name}")
 
 
 # ─── Main Message Handler ────────────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Process incoming group messages and parse work updates."""
+    """Process incoming messages and parse work updates."""
     if not update.message or not update.message.text:
         return
 
     text = update.message.text.strip()
-    match = UPDATE_PATTERN.match(text)
 
-    if not match:
-        # Silently ignore messages that don't match the format
+    # Simple parse: first word = EMP_ID, rest = work
+    parts = text.split(None, 1)
+    if len(parts) < 2:
         return
 
-    # ── Parse the message ──
-    emp_id = match.group(1).strip().upper()
-    work_update = match.group(2).strip()
+    emp_id = parts[0].upper()
+    work_update = parts[1].strip()
 
-    # ── FIX 1: Only process REGISTERED employee IDs ──
-    # This prevents "Hello everyone" from being treated as a work update
+    # Only process registered IDs
     staff_info = config.STAFF_RECORDS.get(emp_id)
     if not staff_info:
-        # Not a registered employee ID — silently ignore
         return
 
-    emp_name = staff_info['name']
-    department = staff_info['dept']
+    emp_name = staff_info["name"]
+    department = staff_info["dept"]
 
-    # Timezone-aware datetime
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.now(tz)
 
-    # Build data dict
     user = update.message.from_user
     username = user.username if user.username else user.first_name or "Unknown"
+    group_name = update.message.chat.title or ("Private Chat" if update.message.chat.type == "private" else "")
 
-    group_name = ""
-    if update.message.chat.title:
-        group_name = update.message.chat.title
-    elif update.message.chat.type == "private":
-        group_name = "Private Chat"
+    deadline = config.get_deadline()
+    try:
+        dl_h, dl_m = map(int, deadline.split(":"))
+        is_late = now.hour > dl_h or (now.hour == dl_h and now.minute > dl_m)
+    except Exception:
+        is_late = False
 
     data = {
-        "emp_id": emp_id,
-        "department": department,
-        "emp_name": emp_name,
-        "username": username,
-        "date": now.strftime("%d-%m-%Y"),
-        "day": now.strftime("%A"),
-        "time": now.strftime("%I:%M %p"),
-        "work_update": work_update,
-        "group_name": group_name,
+        "emp_id": emp_id, "department": department, "emp_name": emp_name,
+        "username": username, "date": now.strftime("%d-%m-%Y"),
+        "day": now.strftime("%A"), "time": now.strftime("%I:%M %p"),
+        "work_update": work_update, "group_name": group_name,
     }
 
-    logger.info(f"New update: {emp_id} | {department} | {emp_name} | {work_update[:80]}")
+    logger.info(f"Update: {emp_id} | {department} | {emp_name}")
 
-    # ── FIX 3: Load persistent daily log ──
+    # Check daily log
     if "daily_log" not in context.bot_data:
         context.bot_data["daily_log"] = config.load_daily_log()
 
@@ -514,201 +344,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         context.bot_data["daily_log"][today_str] = {}
 
     if emp_id in context.bot_data["daily_log"][today_str]:
-        # Already submitted today
         await update.message.reply_text(
-            f"❌ *Already Submitted*\n\n{emp_name} (`{emp_id}`) has already submitted an update for today. "
-            f"Please contact an admin if you need to re-submit.",
-            parse_mode="Markdown"
+            f"❌ *Already Submitted*\n{emp_name} (`{emp_id}`) already submitted today. Use `/allow {emp_id}` to request re-submission.",
+            parse_mode="Markdown",
         )
-        logger.info(f"Duplicate submission blocked: {emp_id}")
         return
 
-    # ── Save to Excel ──
-    excel_saved = save_to_excel(data)
+    # Save to Excel & Google Sheets
+    save_to_excel(data)
+    await save_to_google_sheets(data)
 
-    # ── FIX 2: Save to Google Sheets (non-blocking) ──
-    sheets_saved = await save_to_google_sheets(data)
+    if config.IS_RAILWAY:
+        logger.warning("Excel on Railway is ephemeral.")
 
-    # ── FIX 4: Log warning if Excel saved on Railway ──
-    if config.IS_RAILWAY and excel_saved:
-        logger.warning("Excel saved on Railway — file will be lost on next deploy. Use Google Sheets for persistence.")
+    # Confirmation
+    await update.message.reply_text(f"Thank you, *{emp_name}*! ✅", parse_mode="Markdown")
 
-    # ── Build confirmation message ──
-    confirmation = f"Thank you, *{data['emp_name']}*! ✅"
-
-    # ── Send group confirmation ──
-    try:
-        await update.message.reply_text(confirmation, parse_mode="Markdown")
-        logger.info("Group confirmation sent")
-    except Exception as e:
-        logger.warning(f"Failed to send group confirmation: {e}")
-
-    # ── Send personal notifications ──
+    # Notifications
     await send_personal_notification(context.bot, config.OWNER_CHAT_ID, data, "Owner")
     await send_personal_notification(context.bot, config.HR_CHAT_ID, data, "HR")
 
-    # ── Record Submission (in-memory + file) ──
-    context.bot_data["daily_log"][today_str][emp_id] = True
+    # Record with metadata
+    context.bot_data["daily_log"][today_str][emp_id] = {
+        "time": data["time"], "work": work_update, "late": is_late,
+    }
     config.save_daily_log(context.bot_data["daily_log"])
 
-    logger.info("Update processing complete")
-
-
-async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Any employee can request re-submission. Sends approval request to Owner & HR."""
-    if not context.args:
-        await update.message.reply_text("❗ *Usage:* `/allow EMP_ID`", parse_mode="Markdown")
-        return
-
-    emp_id = context.args[0].upper()
-    requester = update.effective_user
-    requester_name = requester.first_name or "Unknown"
-    requester_id = str(requester.id)
-
-    # Check if the employee ID exists
-    if emp_id not in config.STAFF_RECORDS:
-        await update.message.reply_text(f"❌ Employee `{emp_id}` is not registered.", parse_mode="Markdown")
-        return
-
-    now = datetime.now(pytz.timezone(config.TIMEZONE))
-    today_str = now.strftime("%Y-%m-%d")
-
-    if "daily_log" not in context.bot_data:
-        context.bot_data["daily_log"] = config.load_daily_log()
-
-    # Check if the employee actually submitted today
-    today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
-    if emp_id not in today_log:
-        await update.message.reply_text(f"ℹ️ Employee `{emp_id}` has not submitted anything today — no need to allow.", parse_mode="Markdown")
-        return
-
-    # ── Send approval request to Owner & HR ──
-    staff_name = config.STAFF_RECORDS[emp_id]["name"]
-    group_name = update.message.chat.title or "Private Chat"
-
-    approval_msg = (
-        f"🔔 *Re-submission Request*\n"
-        f"━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 *Requested by:* {requester_name}\n"
-        f"🆔 *Employee:* {staff_name} (`{emp_id}`)\n"
-        f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
-        f"📍 *Group:* {group_name}\n\n"
-        f"Do you approve this re-submission?"
-    )
-
-    # Inline Approve / Reject buttons
-    # Callback data format: allow_approve:{emp_id}:{requester_id}:{chat_id}
-    chat_id = str(update.message.chat.id)
-    keyboard = InlineKeyboardMarkup([
-        [
-            InlineKeyboardButton("✅ Approve", callback_data=f"allow_approve:{emp_id}:{requester_id}:{chat_id}"),
-            InlineKeyboardButton("❌ Reject", callback_data=f"allow_reject:{emp_id}:{requester_id}:{chat_id}"),
-        ]
-    ])
-
-    # Send to Owner
-    if config.OWNER_CHAT_ID:
-        try:
-            await context.bot.send_message(
-                chat_id=int(config.OWNER_CHAT_ID),
-                text=approval_msg,
-                parse_mode="Markdown",
-                reply_markup=keyboard,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send approval request to Owner: {e}")
-
-    # Send to HR
-    if config.HR_CHAT_ID:
-        try:
-            await context.bot.send_message(
-                chat_id=int(config.HR_CHAT_ID),
-                text=approval_msg,
-                parse_mode="Markdown",
-                reply_markup=keyboard,
-            )
-        except Exception as e:
-            logger.warning(f"Failed to send approval request to HR: {e}")
-
-    await update.message.reply_text(
-        f"📨 *Request Sent!*\nYour re-submission request for `{emp_id}` has been sent to Owner & HR for approval. Please wait.",
-        parse_mode="Markdown"
-    )
-    logger.info(f"Re-submission request sent for {emp_id} by {requester_name}")
-
-
-async def allow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handle Approve/Reject button clicks from Owner or HR."""
-    query = update.callback_query
-    await query.answer()
-
-    admin_id = str(query.from_user.id)
-    admin_name = query.from_user.first_name or "Admin"
-
-    # Only Owner or HR can approve/reject
-    if admin_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        await query.edit_message_text("🚫 You are not authorized to approve this request.")
-        return
-
-    data = query.data  # e.g., allow_approve:DEV01:123456:789012
-    parts = data.split(":")
-    if len(parts) != 4:
-        await query.edit_message_text("❌ Invalid request data.")
-        return
-
-    action, emp_id, requester_id, group_chat_id = parts
-    staff_name = config.STAFF_RECORDS.get(emp_id, {}).get("name", emp_id)
-
-    if action == "allow_approve":
-        # ── Approve: remove from daily log ──
-        now = datetime.now(pytz.timezone(config.TIMEZONE))
-        today_str = now.strftime("%Y-%m-%d")
-
-        if "daily_log" not in context.bot_data:
-            context.bot_data["daily_log"] = config.load_daily_log()
-
-        if today_str in context.bot_data.get("daily_log", {}) and emp_id in context.bot_data["daily_log"][today_str]:
-            del context.bot_data["daily_log"][today_str][emp_id]
-            config.save_daily_log(context.bot_data["daily_log"])
-
-        # Update admin's message
-        await query.edit_message_text(
-            f"✅ *Approved* by {admin_name}\n\n"
-            f"Employee `{emp_id}` ({staff_name}) can now re-submit today.",
-            parse_mode="Markdown"
-        )
-
-        # Notify in the group
-        try:
-            await context.bot.send_message(
-                chat_id=int(group_chat_id),
-                text=f"✅ *Re-submission Approved!*\n\n`{emp_id}` ({staff_name}) — your re-submission has been approved by {admin_name}. You can now submit your update again.",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to notify group about approval: {e}")
-
-        logger.info(f"Re-submission approved for {emp_id} by {admin_name}")
-
-    elif action == "allow_reject":
-        # ── Reject: just update the message ──
-        await query.edit_message_text(
-            f"❌ *Rejected* by {admin_name}\n\n"
-            f"Re-submission request for `{emp_id}` ({staff_name}) was denied.",
-            parse_mode="Markdown"
-        )
-
-        # Notify in the group
-        try:
-            await context.bot.send_message(
-                chat_id=int(group_chat_id),
-                text=f"❌ *Re-submission Denied*\n\n`{emp_id}` ({staff_name}) — your re-submission request was denied by {admin_name}.",
-                parse_mode="Markdown"
-            )
-        except Exception as e:
-            logger.warning(f"Failed to notify group about rejection: {e}")
-
-        logger.info(f"Re-submission rejected for {emp_id} by {admin_name}")
+    logger.info("Update complete")
 
 
 # ─── Bot Startup ─────────────────────────────────────────────────────────────
@@ -718,28 +380,21 @@ def main():
     logger.info("  Employee Work Update Bot — Starting")
     logger.info("=" * 55)
 
-    # Validate config
     if not config.BOT_TOKEN:
-        logger.error("BOT_TOKEN is not set! Set it in .env file or as environment variable.")
+        logger.error("BOT_TOKEN not set! Add it to .env file.")
         return
 
-    logger.info(f"  Excel file: {config.EXCEL_FILE}")
-    logger.info(f"  Google Sheets: {'Configured' if config.GOOGLE_SHEET_ID else 'Disabled'}")
-    logger.info(f"  Owner notifications: {'ON' if config.OWNER_CHAT_ID else 'OFF'}")
-    logger.info(f"  HR notifications: {'ON' if config.HR_CHAT_ID else 'OFF'}")
-    logger.info(f"  Timezone: {config.TIMEZONE}")
-    logger.info(f"  Staff records: {len(config.STAFF_RECORDS)} employees loaded")
-
-    if config.IS_RAILWAY:
-        logger.warning("Running on Railway — Excel files are ephemeral. Use Google Sheets for persistent storage.")
-
+    logger.info(f"  Excel: {config.EXCEL_FILE}")
+    logger.info(f"  Google Sheets: {'ON' if config.GOOGLE_SHEET_ID else 'OFF'}")
+    logger.info(f"  Owner: {'ON' if config.OWNER_CHAT_ID else 'OFF'}")
+    logger.info(f"  HR: {'ON' if config.HR_CHAT_ID else 'OFF'}")
+    logger.info(f"  Deadline: {config.get_deadline()}")
+    logger.info(f"  Staff: {len(config.STAFF_RECORDS)} loaded")
     logger.info("=" * 55)
-    logger.info("  Bot is running... Press Ctrl+C to stop")
 
-    # Build and run the application (v21 API)
     app = ApplicationBuilder().token(config.BOT_TOKEN).build()
 
-    # Add command handlers
+    # Basic commands
     app.add_handler(CommandHandler("start", start_command))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("staff", staff_command))
@@ -748,13 +403,31 @@ def main():
     app.add_handler(CommandHandler("allow", allow_command))
     app.add_handler(CommandHandler("report", report_command))
 
-    # Handle approval button clicks
-    app.add_handler(CallbackQueryHandler(allow_callback, pattern=r"^allow_(approve|reject):"))
+    # Employee commands
+    app.add_handler(CommandHandler("mystatus", mystatus_command))
+    app.add_handler(CommandHandler("myprofile", myprofile_command))
+    app.add_handler(CommandHandler("edit", edit_command))
+    app.add_handler(CommandHandler("leave", leave_command))
 
-    # Handle all text messages (groups + private)
+    # Admin commands
+    app.add_handler(CommandHandler("absent", absent_command))
+    app.add_handler(CommandHandler("late", late_command))
+    app.add_handler(CommandHandler("history", history_command))
+    app.add_handler(CommandHandler("weeklyreport", weeklyreport_command))
+    app.add_handler(CommandHandler("monthly", monthly_command))
+    app.add_handler(CommandHandler("export", export_command))
+    app.add_handler(CommandHandler("broadcast", broadcast_command))
+    app.add_handler(CommandHandler("deadline", deadline_command))
+    app.add_handler(CommandHandler("sethr", sethr_command))
+
+    # Callback handlers for buttons
+    app.add_handler(CallbackQueryHandler(allow_callback, pattern=r"^allow_"))
+    app.add_handler(CallbackQueryHandler(edit_callback, pattern=r"^edit_"))
+    app.add_handler(CallbackQueryHandler(leave_callback, pattern=r"^leave_"))
+
+    # Message handler (must be last)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
 
-    # Start polling
     app.run_polling(drop_pending_updates=True)
 
 

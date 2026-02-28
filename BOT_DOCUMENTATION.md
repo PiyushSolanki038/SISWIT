@@ -1,73 +1,79 @@
 # 🤖 Employee Work Update Bot — Full Documentation
 
-This bot is a simple and fast tool to record your daily work updates into Excel and Google Sheets.
+A Telegram bot that records daily work updates to Excel & Google Sheets with role-based access control.
 
 ---
 
-## 🏗️ 1. How It Works
-
-The bot listens to messages in the Telegram group. If it sees a **registered Employee ID** followed by a **work description**, it saves the update immediately to Excel and Google Sheets.
-
-> ⚠️ Only messages starting with a **registered Employee ID** are processed. All other messages are silently ignored.
-
----
-
-## 📝 2. Using the Bot for Updates
-
-To submit your work, enter your message in the following format:
+## 📝 Submit Your Update
 
 **Format:** `YOUR_ID Your work description`
 
-*   **CORRECT:** `DEV01 Finished the login page`
-*   **CORRECT:** `PK042 Started working on database and completed schema design`
-*   **INCORRECT:** `DEV01 - Finished the login page` (Do not use the dash symbol `-`)
-*   **INCORRECT:** `Hello everyone` (Not a registered ID — will be ignored)
+✅ `DEV01 Fixed the login page and deployed to staging`
+❌ `Hello everyone` ← ignored (not a registered ID)
 
-> 💡 Your Employee ID must be registered in the system. Ask admin to use `/addstaff` if you are new.
+> Your Employee ID must be registered. Use `/staff` to check.
 
 ---
 
-## 🔧 3. Commands
+## 🔧 Commands — Everyone
 
-### For Everyone
-
-| Command | Action |
-| :--- | :--- |
-| **`/start`** | Welcome message with instructions. |
-| **`/help`**  | Shows all available commands and format. |
-| **`/allow`** | Request re-submission for an employee (e.g., `/allow DEV01`). Sends approval request to Owner & HR. |
-
-### Admin Commands (Owner & HR Only)
-
-| Command | Action |
-| :--- | :--- |
-| **`/staff`** | Shows the list of registered employees. |
-| **`/addstaff`** | Adds a new employee (e.g., `/addstaff ID - Name - Dept`). |
-| **`/removestaff`** | Removes an employee (e.g., `/removestaff DEV01`). |
-| **`/allow`** | When used by admin, directly sends approval notifications to both Owner & HR. |
-| **`/report`** | Shows today's submission status — who submitted and who hasn't. |
+| Command | Where | What It Does |
+|---------|:-----:|-------------|
+| `/start` | 💬 Group | Welcome message |
+| `/help` | 💬 Group | All commands list |
+| `/allow ID` | 📩 Admin DM | Request re-submission (Approve/Reject buttons) |
+| `/mystatus ID` | 📩 Your DM | Your 7-day submission status |
+| `/myprofile ID` | 📩 Your DM | Your profile & stats |
+| `/edit ID New text` | 📩 Admin DM | Request edit (Approve/Reject buttons) |
+| `/leave ID DD-MM-YYYY Reason` | 📩 Admin DM | Request leave (Approve/Reject buttons) |
 
 ---
 
-## 🛡️ 4. Duplicate Prevention & Re-submission
+## 👑 Commands — Owner & HR Only
 
-To keep the records clean, the bot only allows **one submission per employee per day**.
+| Command | Where | What It Does |
+|---------|:-----:|-------------|
+| `/staff` | 💬 Group | List all registered employees |
+| `/addstaff ID - Name - Dept` | 💬 Group | Add new employee |
+| `/removestaff ID` | 💬 Group | Remove employee |
+| `/report` | 💬 Group | Today's full status (submitted/absent/leave) |
+| `/absent` | 💬 Group | Quick absent-only list |
+| `/late` | 💬 Group | Who submitted after deadline |
+| `/history ID` | 📩 Your DM | Employee's 7-day history |
+| `/weeklyreport` | 📩 Your DM | Full week grid for all employees |
+| `/monthly` | 📩 Your DM | Monthly attendance % with progress bars |
+| `/export` | 📩 Your DM | Get Excel file + Google Sheet link |
+| `/broadcast Text` | 💬 Group | Send announcement |
+| `/deadline HH:MM` | 💬 Group | Set/view submission deadline |
+| `/sethr CHAT_ID` | 💬 Group | Change HR (Owner only) |
 
-- If you try to submit a second time, the bot will block it and show an error.
-- The daily log **persists across bot restarts** (saved to `daily_log.json`).
+---
 
-### How to Re-submit:
-1. **Employee** types `/allow DEV01` in the group
-2. **Owner & HR** receive a private message with **✅ Approve** and **❌ Reject** buttons
-3. If **approved** → bot notifies the group and the employee can submit again
-4. If **rejected** → bot notifies the group that the request was denied
+## 🛡️ Re-submission & Leave Approval Flow
 
-## ⚡ 5. Features & Automation
+1. Employee types `/allow DEV01` or `/leave DEV01 05-03-2026 Sick`
+2. Owner & HR get a private message with **✅ Approve** / **❌ Reject** buttons
+3. On tap → bot notifies the group with the result
 
-- **Auto-Sync**: Every update is saved to the local Excel file and your Google Sheet in real-time.
-- **Non-Blocking**: Google Sheets sync runs in the background — the bot stays responsive.
-- **Private Alerts**: The Owner and HR get a private message whenever someone posts an update.
-- **Role-Based**: Only approved Owners and HR can use management commands.
-- **Daily Report**: Owner/HR can use `/report` to see who has and hasn't submitted today.
-- **Persistent Tracking**: Daily submission log survives bot restarts.
-- **`.env` Support**: Configuration auto-loads from a `.env` file.
+---
+
+## 📊 Excel & Google Sheets Structure
+
+| Sheet | Purpose |
+|-------|---------|
+| `Mar 2026` (monthly) | Daily work entries with Status & On Time columns |
+| `Dashboard` | Attendance %, late count, leave count per employee |
+| `Leave Register` | All approved leave records |
+
+---
+
+## ⚡ Features
+
+- **Dual storage** — Excel + Google Sheets in real-time
+- **Non-blocking** — Google Sheets runs in background thread
+- **Role-based** — Employee, Owner, HR permissions
+- **Approval flow** — /allow, /edit, /leave with Approve/Reject buttons
+- **Persistent tracking** — Daily log survives bot restarts
+- **Late detection** — Configurable deadline with /late report
+- **Monthly reports** — Visual progress bars per employee
+- **`.env` support** — Auto-loads from .env file

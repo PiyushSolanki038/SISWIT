@@ -2,6 +2,8 @@ __pycache__/
 *.xlsx
 staff.json
 daily_log.json
+leave_log.json
+bot_settings.json
 credentials.json
 .env
 .gemini/
