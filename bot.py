@@ -8,7 +8,7 @@ Uses python-telegram-bot v21 API (ApplicationBuilder).
 """
 
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 import pytz
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -319,17 +319,27 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username if user.username else user.first_name or "Unknown"
     group_name = update.message.chat.title or ("Private Chat" if update.message.chat.type == "private" else "")
 
-    deadline = config.get_deadline()
-    try:
-        dl_h, dl_m = map(int, deadline.split(":"))
-        is_late = now.hour > dl_h or (now.hour == dl_h and now.minute > dl_m)
-    except Exception:
-        is_late = False
+    # ─── Grace Period: 12:00 AM to 1:00 AM → count as yesterday (Late) ────
+    if now.hour < 1:
+        # Midnight grace period — record for previous day
+        record_date = now - timedelta(days=1)
+        is_late = True
+        grace_note = f"⏰ _Recorded for {record_date.strftime('%d %b')} (late submission)_"
+    else:
+        record_date = now
+        grace_note = ""
+        # Normal late check against deadline
+        deadline = config.get_deadline()
+        try:
+            dl_h, dl_m = map(int, deadline.split(":"))
+            is_late = now.hour > dl_h or (now.hour == dl_h and now.minute > dl_m)
+        except Exception:
+            is_late = False
 
     data = {
         "emp_id": emp_id, "department": department, "emp_name": emp_name,
-        "username": username, "date": now.strftime("%d-%m-%Y"),
-        "day": now.strftime("%A"), "time": now.strftime("%I:%M %p"),
+        "username": username, "date": record_date.strftime("%d-%m-%Y"),
+        "day": record_date.strftime("%A"), "time": now.strftime("%I:%M %p"),
         "work_update": work_update, "group_name": group_name,
     }
 
@@ -339,13 +349,13 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "daily_log" not in context.bot_data:
         context.bot_data["daily_log"] = config.load_daily_log()
 
-    today_str = now.strftime("%Y-%m-%d")
-    if today_str not in context.bot_data["daily_log"]:
-        context.bot_data["daily_log"][today_str] = {}
+    log_date_str = record_date.strftime("%Y-%m-%d")
+    if log_date_str not in context.bot_data["daily_log"]:
+        context.bot_data["daily_log"][log_date_str] = {}
 
-    if emp_id in context.bot_data["daily_log"][today_str]:
+    if emp_id in context.bot_data["daily_log"][log_date_str]:
         await update.message.reply_text(
-            f"❌ *Already Submitted*\n{emp_name} (`{emp_id}`) already submitted today. Use `/allow {emp_id}` to request re-submission.",
+            f"❌ *Already Submitted*\n{emp_name} (`{emp_id}`) already submitted for {record_date.strftime('%d %b')}. Use `/allow {emp_id}` to request re-submission.",
             parse_mode="Markdown",
         )
         return
@@ -358,14 +368,17 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
         logger.warning("Excel on Railway is ephemeral.")
 
     # Confirmation
-    await update.message.reply_text(f"Thank you, *{emp_name}*! ✅", parse_mode="Markdown")
+    confirm_msg = f"Thank you, *{emp_name}*! ✅"
+    if grace_note:
+        confirm_msg += f"\n{grace_note}"
+    await update.message.reply_text(confirm_msg, parse_mode="Markdown")
 
     # Notifications
     await send_personal_notification(context.bot, config.OWNER_CHAT_ID, data, "Owner")
     await send_personal_notification(context.bot, config.HR_CHAT_ID, data, "HR")
 
     # Record with metadata
-    context.bot_data["daily_log"][today_str][emp_id] = {
+    context.bot_data["daily_log"][log_date_str][emp_id] = {
         "time": data["time"], "work": work_update, "late": is_late,
     }
     config.save_daily_log(context.bot_data["daily_log"])
