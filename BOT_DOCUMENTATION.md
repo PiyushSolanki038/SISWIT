@@ -35,6 +35,7 @@ To submit your work, enter your message in the following format:
 | :--- | :--- |
 | **`/start`** | Welcome message with instructions. |
 | **`/help`**  | Shows all available commands and format. |
+| **`/allow`** | Request re-submission for an employee (e.g., `/allow DEV01`). Sends approval request to Owner & HR. |
 
 ### Admin Commands (Owner & HR Only)
 
@@ -43,18 +44,25 @@ To submit your work, enter your message in the following format:
 | **`/staff`** | Shows the list of registered employees. |
 | **`/addstaff`** | Adds a new employee (e.g., `/addstaff ID - Name - Dept`). |
 | **`/removestaff`** | Removes an employee (e.g., `/removestaff DEV01`). |
-| **`/allow`** | Allows re-submission today (e.g., `/allow DEV01`). |
+| **`/allow`** | When used by admin, directly approves re-submission (no buttons). |
 | **`/report`** | Shows today's submission status — who submitted and who hasn't. |
 
 ---
 
-## 🛡️ 4. Duplicate Prevention
+## 🛡️ 4. Duplicate Prevention & Re-submission
 
 To keep the records clean, the bot only allows **one submission per employee per day**.
 
 - If you try to submit a second time, the bot will block it and show an error.
 - The daily log **persists across bot restarts** (saved to `daily_log.json`).
-- **Admin bypass**: If an employee *must* re-submit (e.g., they made a mistake), an Owner or HR can use the `/allow ID` command to clear their daily log.
+
+### How to Re-submit:
+1. **Employee** types `/allow DEV01` in the group
+2. **Owner & HR** receive a private message with **✅ Approve** and **❌ Reject** buttons
+3. If **approved** → bot notifies the group and the employee can submit again
+4. If **rejected** → bot notifies the group that the request was denied
+
+> 💡 **Admin shortcut:** If Owner or HR uses `/allow DEV01` themselves, it's approved instantly — no buttons needed.
 
 ## ⚡ 5. Features & Automation
 

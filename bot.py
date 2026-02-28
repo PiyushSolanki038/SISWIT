@@ -14,8 +14,8 @@ import logging
 from datetime import datetime
 
 import pytz
-from telegram import Update
-from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, ContextTypes, filters
+from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
+from telegram.ext import ApplicationBuilder, CommandHandler, MessageHandler, CallbackQueryHandler, ContextTypes, filters
 
 import config
 
@@ -555,31 +555,169 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Allow an employee to re-submit today."""
-    user_id = str(update.effective_user.id)
-    if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        await update.message.reply_text("🚫 *Permission Denied:* Only admins can use this command.", parse_mode="Markdown")
-        return
-
+    """Any employee can request re-submission. Sends approval request to Owner & HR."""
     if not context.args:
-        await update.message.reply_text("Usage: `/allow EMP_ID`", parse_mode="Markdown")
+        await update.message.reply_text("❗ *Usage:* `/allow EMP_ID`", parse_mode="Markdown")
         return
 
     emp_id = context.args[0].upper()
+    requester = update.effective_user
+    requester_name = requester.first_name or "Unknown"
+    requester_id = str(requester.id)
+
+    # Check if the employee ID exists
+    if emp_id not in config.STAFF_RECORDS:
+        await update.message.reply_text(f"❌ Employee `{emp_id}` is not registered.", parse_mode="Markdown")
+        return
+
     now = datetime.now(pytz.timezone(config.TIMEZONE))
     today_str = now.strftime("%Y-%m-%d")
 
     if "daily_log" not in context.bot_data:
         context.bot_data["daily_log"] = config.load_daily_log()
 
-    if today_str in context.bot_data.get("daily_log", {}) and emp_id in context.bot_data["daily_log"][today_str]:
-        del context.bot_data["daily_log"][today_str][emp_id]
-        config.save_daily_log(context.bot_data["daily_log"])
-        await update.message.reply_text(f"✅ Employee `{emp_id}` can now re-submit today.", parse_mode="Markdown")
-        logger.info(f"Re-submission allowed for {emp_id}")
+    # Check if the employee actually submitted today
+    today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
+    if emp_id not in today_log:
+        await update.message.reply_text(f"ℹ️ Employee `{emp_id}` has not submitted anything today — no need to allow.", parse_mode="Markdown")
         return
 
-    await update.message.reply_text(f"Employee `{emp_id}` has not submitted anything today.", parse_mode="Markdown")
+    # Check if user is admin — if so, approve directly without request flow
+    if requester_id in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+        del context.bot_data["daily_log"][today_str][emp_id]
+        config.save_daily_log(context.bot_data["daily_log"])
+        staff_name = config.STAFF_RECORDS[emp_id]["name"]
+        await update.message.reply_text(f"✅ Employee `{emp_id}` ({staff_name}) can now re-submit today.", parse_mode="Markdown")
+        logger.info(f"Admin directly allowed re-submission for {emp_id}")
+        return
+
+    # ── Employee request: send approval to Owner & HR ──
+    staff_name = config.STAFF_RECORDS[emp_id]["name"]
+    group_name = update.message.chat.title or "Private Chat"
+
+    approval_msg = (
+        f"🔔 *Re-submission Request*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n"
+        f"👤 *Requested by:* {requester_name}\n"
+        f"🆔 *Employee:* {staff_name} (`{emp_id}`)\n"
+        f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
+        f"📍 *Group:* {group_name}\n\n"
+        f"Do you approve this re-submission?"
+    )
+
+    # Inline Approve / Reject buttons
+    # Callback data format: allow_approve:{emp_id}:{requester_id}:{chat_id}
+    chat_id = str(update.message.chat.id)
+    keyboard = InlineKeyboardMarkup([
+        [
+            InlineKeyboardButton("✅ Approve", callback_data=f"allow_approve:{emp_id}:{requester_id}:{chat_id}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"allow_reject:{emp_id}:{requester_id}:{chat_id}"),
+        ]
+    ])
+
+    # Send to Owner
+    if config.OWNER_CHAT_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=int(config.OWNER_CHAT_ID),
+                text=approval_msg,
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send approval request to Owner: {e}")
+
+    # Send to HR
+    if config.HR_CHAT_ID:
+        try:
+            await context.bot.send_message(
+                chat_id=int(config.HR_CHAT_ID),
+                text=approval_msg,
+                parse_mode="Markdown",
+                reply_markup=keyboard,
+            )
+        except Exception as e:
+            logger.warning(f"Failed to send approval request to HR: {e}")
+
+    await update.message.reply_text(
+        f"📨 *Request Sent!*\nYour re-submission request for `{emp_id}` has been sent to Owner & HR for approval. Please wait.",
+        parse_mode="Markdown"
+    )
+    logger.info(f"Re-submission request sent for {emp_id} by {requester_name}")
+
+
+async def allow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Handle Approve/Reject button clicks from Owner or HR."""
+    query = update.callback_query
+    await query.answer()
+
+    admin_id = str(query.from_user.id)
+    admin_name = query.from_user.first_name or "Admin"
+
+    # Only Owner or HR can approve/reject
+    if admin_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+        await query.edit_message_text("🚫 You are not authorized to approve this request.")
+        return
+
+    data = query.data  # e.g., allow_approve:DEV01:123456:789012
+    parts = data.split(":")
+    if len(parts) != 4:
+        await query.edit_message_text("❌ Invalid request data.")
+        return
+
+    action, emp_id, requester_id, group_chat_id = parts
+    staff_name = config.STAFF_RECORDS.get(emp_id, {}).get("name", emp_id)
+
+    if action == "allow_approve":
+        # ── Approve: remove from daily log ──
+        now = datetime.now(pytz.timezone(config.TIMEZONE))
+        today_str = now.strftime("%Y-%m-%d")
+
+        if "daily_log" not in context.bot_data:
+            context.bot_data["daily_log"] = config.load_daily_log()
+
+        if today_str in context.bot_data.get("daily_log", {}) and emp_id in context.bot_data["daily_log"][today_str]:
+            del context.bot_data["daily_log"][today_str][emp_id]
+            config.save_daily_log(context.bot_data["daily_log"])
+
+        # Update admin's message
+        await query.edit_message_text(
+            f"✅ *Approved* by {admin_name}\n\n"
+            f"Employee `{emp_id}` ({staff_name}) can now re-submit today.",
+            parse_mode="Markdown"
+        )
+
+        # Notify in the group
+        try:
+            await context.bot.send_message(
+                chat_id=int(group_chat_id),
+                text=f"✅ *Re-submission Approved!*\n\n`{emp_id}` ({staff_name}) — your re-submission has been approved by {admin_name}. You can now submit your update again.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify group about approval: {e}")
+
+        logger.info(f"Re-submission approved for {emp_id} by {admin_name}")
+
+    elif action == "allow_reject":
+        # ── Reject: just update the message ──
+        await query.edit_message_text(
+            f"❌ *Rejected* by {admin_name}\n\n"
+            f"Re-submission request for `{emp_id}` ({staff_name}) was denied.",
+            parse_mode="Markdown"
+        )
+
+        # Notify in the group
+        try:
+            await context.bot.send_message(
+                chat_id=int(group_chat_id),
+                text=f"❌ *Re-submission Denied*\n\n`{emp_id}` ({staff_name}) — your re-submission request was denied by {admin_name}.",
+                parse_mode="Markdown"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to notify group about rejection: {e}")
+
+        logger.info(f"Re-submission rejected for {emp_id} by {admin_name}")
 
 
 # ─── Bot Startup ─────────────────────────────────────────────────────────────
@@ -618,6 +756,9 @@ def main():
     app.add_handler(CommandHandler("removestaff", removestaff_command))
     app.add_handler(CommandHandler("allow", allow_command))
     app.add_handler(CommandHandler("report", report_command))
+
+    # Handle approval button clicks
+    app.add_handler(CallbackQueryHandler(allow_callback, pattern=r"^allow_(approve|reject):"))
 
     # Handle all text messages (groups + private)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))
