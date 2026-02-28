@@ -391,18 +391,20 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
             current_date = data["date"]
             if last_date and last_date != current_date and last_date != "Date":
                 # Insert a day-separator row
-                sep_row = [f"📅 {current_date} — {data['day']}", "", "", "", "", "", "", "", "", "", "", ""]
+                sep_text = f"📅 {current_date} — {data['day']}"
+                sep_row = [sep_text, "", "", "", "", "", "", "", "", "", "", ""]
                 sheet.append_row(sep_row)
-                # Format separator row
-                sep_row_num = len(sheet.get_all_values())
-                sheet.format(f"A{sep_row_num}:L{sep_row_num}", {
-                    "backgroundColor": {"red": 0.839, "green": 0.894, "blue": 0.941},
-                    "textFormat": {"bold": True, "fontSize": 10,
-                                  "foregroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361}},
-                    "horizontalAlignment": "CENTER",
-                })
-                # Merge the separator cells
-                sheet.merge_cells(f"A{sep_row_num}:L{sep_row_num}")
+                # Format separator row (skip merge to avoid API errors)
+                try:
+                    sep_row_num = len(sheet.get_all_values())
+                    sheet.format(f"A{sep_row_num}:L{sep_row_num}", {
+                        "backgroundColor": {"red": 0.839, "green": 0.894, "blue": 0.941},
+                        "textFormat": {"bold": True, "fontSize": 10,
+                                      "foregroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361}},
+                        "horizontalAlignment": "CENTER",
+                    })
+                except Exception as fmt_e:
+                    logger.warning(f"Separator formatting failed (non-critical): {fmt_e}")
                 sr_no += 1
 
         row = [
@@ -414,6 +416,23 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
 
         sheet.append_row(row)
         logger.info(f"Google Sheets: Saved update #{sr_no} to {month_name}")
+
+        # Also update Attendance_Log if it exists (backward compatibility)
+        try:
+            att_sheet = spreadsheet.worksheet("Attendance_Log")
+            att_existing = att_sheet.get_all_values()
+            att_sr = len(att_existing) if att_existing else 1
+            att_row = [
+                att_sr, data["emp_id"], data["department"], data["emp_name"],
+                data["date"], data["day"], data["time"],
+                "Present" if on_time else "Late",
+                data["work_update"], data["group_name"],
+            ]
+            att_sheet.append_row(att_row)
+            logger.info(f"Google Sheets: Also updated Attendance_Log #{att_sr}")
+        except Exception:
+            pass  # Attendance_Log doesn't exist or different format — skip
+
         return True
 
     except Exception as e:
