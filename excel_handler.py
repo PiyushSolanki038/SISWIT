@@ -226,8 +226,25 @@ def _update_dashboard(wb):
     ws.freeze_panes = "A2"
 
 
-def save_leave_to_excel(emp_id, emp_name, dept, leave_date, reason, approved_by):
-    """Save an approved leave entry to the Leave Register sheet in Excel."""
+def count_monthly_leaves(emp_id, leave_date_str):
+    """Count how many approved leaves an employee has in the same month."""
+    try:
+        leave_date = datetime.strptime(leave_date_str, "%d-%m-%Y")
+        month_key = leave_date.strftime("%Y-%m")
+        leave_log = config.load_leave_log()
+        count = 0
+        for date_str, entries in leave_log.items():
+            if date_str.startswith(month_key) and emp_id in entries:
+                count += 1
+        return count
+    except Exception:
+        return 0
+
+
+def save_leave_to_excel(emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count):
+    """Save an approved leave entry to the Leave Register sheet in Excel.
+    If leave_count > 3, adds -₹500 salary deduction per extra leave.
+    """
     try:
         from openpyxl import Workbook, load_workbook
         from openpyxl.styles import Font, PatternFill, Alignment
@@ -247,7 +264,11 @@ def save_leave_to_excel(emp_id, emp_name, dept, leave_date, reason, approved_by)
             next_row = ws.max_row + 1
         else:
             ws = wb.create_sheet(sheet_name)
-            leave_headers = ["Sr No", "Employee ID", "Name", "Department", "Leave Date", "Reason", "Approved By", "Status"]
+            leave_headers = [
+                "Sr No", "Employee ID", "Name", "Department",
+                "Leave Date", "Reason", "Approved By", "Status",
+                "Leave #", "Deduction",
+            ]
             header_fill = PatternFill(start_color="E65100", end_color="E65100", fill_type="solid")
             header_font = Font(name="Arial", bold=True, color="FFFFFF", size=11)
 
@@ -257,21 +278,41 @@ def save_leave_to_excel(emp_id, emp_name, dept, leave_date, reason, approved_by)
                 cell.font = header_font
                 cell.alignment = Alignment(horizontal="center", vertical="center")
 
-            for i, w in enumerate([8, 15, 20, 15, 14, 40, 20, 12], 1):
+            for i, w in enumerate([8, 15, 20, 15, 14, 40, 20, 14, 10, 16], 1):
                 ws.column_dimensions[chr(64 + i)].width = w
 
             ws.freeze_panes = "A2"
             next_row = 2
 
+        # Calculate deduction
+        is_extra = leave_count > 3
+        deduction = f"-₹{(leave_count - 3) * 500}" if is_extra else "—"
+        status = "⚠️ Extra Leave" if is_extra else "✅ Approved"
+
         sr = next_row - 1
-        for col_idx, val in enumerate([sr, emp_id, emp_name, dept, leave_date, reason, approved_by, "✅ Approved"], 1):
-            ws.cell(row=next_row, column=col_idx, value=val)
-            ws.cell(row=next_row, column=col_idx).font = Font(name="Arial", size=10)
-            ws.cell(row=next_row, column=col_idx).alignment = Alignment(horizontal="center", vertical="center")
+        row_data = [
+            sr, emp_id, emp_name, dept, leave_date,
+            reason, approved_by, status, leave_count, deduction,
+        ]
+
+        for col_idx, val in enumerate(row_data, 1):
+            cell = ws.cell(row=next_row, column=col_idx, value=val)
+            cell.font = Font(name="Arial", size=10)
+            cell.alignment = Alignment(horizontal="center", vertical="center")
+
+        # Highlight deduction in red if applicable
+        if is_extra:
+            deduction_cell = ws.cell(row=next_row, column=10)
+            deduction_cell.font = Font(name="Arial", size=10, bold=True, color="DC143C")
+            deduction_cell.fill = PatternFill(start_color="FFE0E0", end_color="FFE0E0", fill_type="solid")
+
+            status_cell = ws.cell(row=next_row, column=8)
+            status_cell.font = Font(name="Arial", size=10, color="DC143C")
 
         wb.save(file_path)
-        logger.info(f"Excel: Leave recorded for {emp_id} on {leave_date}")
-        return True
+        logger.info(f"Excel: Leave #{leave_count} recorded for {emp_id} on {leave_date}" +
+                     (f" (Deduction: {deduction})" if is_extra else ""))
+        return is_extra
     except Exception as e:
         logger.error(f"Excel leave save failed: {e}", exc_info=True)
         return False

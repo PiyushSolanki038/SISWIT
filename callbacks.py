@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 import config
-from excel_handler import save_leave_to_excel
+from excel_handler import save_leave_to_excel, count_monthly_leaves
 
 logger = logging.getLogger(__name__)
 
@@ -187,16 +187,27 @@ async def leave_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         leave_log[log_key][emp_id] = {"approved_by": admin_name, "reason": reason}
         config.save_leave_log(leave_log)
 
-        # Save to Excel Leave Register
-        save_leave_to_excel(emp_id, staff_name, dept, leave_date, reason, admin_name)
+        # Count monthly leaves (including this one)
+        leave_count = count_monthly_leaves(emp_id, leave_date)
 
-        await query.edit_message_text(
+        # Save to Excel Leave Register (with deduction if > 3)
+        save_leave_to_excel(emp_id, staff_name, dept, leave_date, reason, admin_name, leave_count)
+
+        # Admin message — shows deduction info privately
+        admin_msg = (
             f"✅ *Leave Approved* by {admin_name}\n\n"
             f"🆔 `{emp_id}` ({staff_name})\n"
-            f"📅 {leave_date}",
-            parse_mode="Markdown",
+            f"📅 {leave_date}\n"
+            f"📊 Leave #{leave_count} this month"
         )
+        if leave_count > 3:
+            deduction = (leave_count - 3) * 500
+            admin_msg += f"\n\n⚠️ *Extra leave!* Salary deduction: *-₹{deduction}*"
+            admin_msg += f"\n_(3 free leaves exceeded, ₹500 per extra leave)_"
 
+        await query.edit_message_text(admin_msg, parse_mode="Markdown")
+
+        # Group message — simple, NO deduction info shown
         try:
             await context.bot.send_message(
                 chat_id=int(group_chat_id),
@@ -211,7 +222,7 @@ async def leave_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if key in context.bot_data.get("pending_leaves", {}):
             del context.bot_data["pending_leaves"][key]
 
-        logger.info(f"Leave approved for {emp_id} on {leave_date} by {admin_name}")
+        logger.info(f"Leave #{leave_count} approved for {emp_id} on {leave_date} by {admin_name}")
 
     elif action == "leave_reject":
         await query.edit_message_text(
