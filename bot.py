@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 
 import config
-from excel_handler import save_to_excel, save_to_google_sheets
+from excel_handler import save_to_excel, save_to_google_sheets, update_row_in_google_sheets
 from commands_employee import mystatus_command, myprofile_command, edit_command, leave_command
 from commands_admin import (
     absent_command, late_command, history_command, weeklyreport_command,
@@ -232,7 +232,7 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Request re-submission (sends approval to Owner & HR)."""
+    """Request re-submission (sends approval to Owner & HR). Max 1 per day."""
     if not context.args:
         await update.message.reply_text("❗ *Usage:* `/allow EMP_ID`", parse_mode="Markdown")
         return
@@ -260,6 +260,46 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     staff_name = config.STAFF_RECORDS[emp_id]["name"]
     group_name = update.message.chat.title or "Private Chat"
     chat_id = str(update.message.chat.id)
+
+    # ─── Allow Limit: max 1 per day per employee ─────────────────────────
+    if "allow_usage" not in context.bot_data:
+        context.bot_data["allow_usage"] = {}
+    if today_str not in context.bot_data["allow_usage"]:
+        context.bot_data["allow_usage"][today_str] = {}
+
+    usage_count = context.bot_data["allow_usage"][today_str].get(emp_id, 0)
+
+    if usage_count >= 1:
+        # 2nd+ attempt — send suspicious activity alert to Owner & HR
+        alert_msg = (
+            f"🚨 *SUSPICIOUS ACTIVITY ALERT*\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"⚠️ *Employee:* {staff_name} (`{emp_id}`)\n"
+            f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
+            f"🔁 *Allow Attempts:* {usage_count + 1} (exceeded limit!)\n"
+            f"👤 *Requested By:* {requester_name}\n\n"
+            f"_This employee has already used their 1 allowed re-submission today. "
+            f"Repeated requests may indicate misuse or data manipulation._"
+        )
+
+        for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+            if admin_id:
+                try:
+                    await context.bot.send_message(
+                        chat_id=int(admin_id), text=alert_msg, parse_mode="Markdown",
+                    )
+                except Exception as e:
+                    logger.warning(f"Failed to send alert to {admin_id}: {e}")
+
+        await update.message.reply_text(
+            f"🚫 *Request Denied*\n\n`{emp_id}` has already used their 1 re-submission for today. "
+            f"Owner & HR have been notified.",
+            parse_mode="Markdown",
+        )
+        logger.warning(f"SUSPICIOUS: {emp_id} attempted /allow #{usage_count + 1} on {today_str}")
+        return
+
+    # Track usage (increment AFTER approval is sent)
+    context.bot_data["allow_usage"][today_str][emp_id] = usage_count + 1
 
     approval_msg = (
         f"🔔 *Re-submission Request*\n━━━━━━━━━━━━━━━━━━━━━━\n"
@@ -353,29 +393,46 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if log_date_str not in context.bot_data["daily_log"]:
         context.bot_data["daily_log"][log_date_str] = {}
 
+    # Check if this is a re-submission (/allow was used)
+    is_resubmission = False
     if emp_id in context.bot_data["daily_log"][log_date_str]:
+        # Check if re-submission was approved (daily_log cleared by allow_callback)
         await update.message.reply_text(
             f"❌ *Already Submitted*\n{emp_name} (`{emp_id}`) already submitted for {record_date.strftime('%d %b')}. Use `/allow {emp_id}` to request re-submission.",
             parse_mode="Markdown",
         )
         return
 
+    # Check if employee had a previous submission today that was cleared by /allow
+    allow_usage = context.bot_data.get("allow_usage", {}).get(log_date_str, {})
+    if emp_id in allow_usage and allow_usage[emp_id] > 0:
+        is_resubmission = True
+
     # Save to Excel & Google Sheets
     save_to_excel(data)
-    await save_to_google_sheets(data)
+    if is_resubmission:
+        # UPDATE existing row instead of creating a new one
+        await update_row_in_google_sheets(data)
+    else:
+        await save_to_google_sheets(data)
 
     if config.IS_RAILWAY:
         logger.warning("Excel on Railway is ephemeral.")
 
     # Confirmation
     confirm_msg = f"Thank you, *{emp_name}*! ✅"
+    if is_resubmission:
+        confirm_msg += "\n📝 _Your previous entry has been updated._"
     if grace_note:
         confirm_msg += f"\n{grace_note}"
     await update.message.reply_text(confirm_msg, parse_mode="Markdown")
 
     # Notifications
-    await send_personal_notification(context.bot, config.OWNER_CHAT_ID, data, "Owner")
-    await send_personal_notification(context.bot, config.HR_CHAT_ID, data, "HR")
+    notification_data = data.copy()
+    if is_resubmission:
+        notification_data["work_update"] = f"[RE-SUBMIT] {work_update}"
+    await send_personal_notification(context.bot, config.OWNER_CHAT_ID, notification_data, "Owner")
+    await send_personal_notification(context.bot, config.HR_CHAT_ID, notification_data, "HR")
 
     # Record with metadata
     context.bot_data["daily_log"][log_date_str][emp_id] = {

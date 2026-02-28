@@ -449,6 +449,86 @@ async def save_to_google_sheets(data: dict) -> bool:
         return False
 
 
+def _update_row_in_google_sheets_sync(data: dict) -> bool:
+    """Find and UPDATE an existing row by emp_id + date (for /allow re-submissions)."""
+    if not config.GOOGLE_SHEET_ID:
+        return False
+
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+
+        creds = Credentials.from_service_account_file(config.GOOGLE_CREDS_FILE, scopes=scopes)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
+
+        month_name = _get_month_sheet_name()
+        on_time = _is_on_time(data["time"])
+        emp_id = data["emp_id"]
+        target_date = data["date"]
+
+        updated = False
+
+        # Update in monthly sheet (Mar 2026)
+        try:
+            sheet = spreadsheet.worksheet(month_name)
+            all_rows = sheet.get_all_values()
+
+            for row_idx, row in enumerate(all_rows):
+                if len(row) >= 6 and row[1] == emp_id and row[5] == target_date:
+                    # Found the row — update Time (col 8), Work Update (col 9), On Time (col 12)
+                    actual_row = row_idx + 1  # 1-indexed
+                    sheet.update_cell(actual_row, 8, data["time"])
+                    sheet.update_cell(actual_row, 9, data["work_update"])
+                    sheet.update_cell(actual_row, 12, "✅ Yes" if on_time else "❌ Late")
+                    logger.info(f"Google Sheets: Updated row {actual_row} in {month_name} for {emp_id}")
+                    updated = True
+                    break
+        except Exception as e:
+            logger.warning(f"Failed to update {month_name}: {e}")
+
+        # Also update Attendance_Log if it exists
+        try:
+            att_sheet = spreadsheet.worksheet("Attendance_Log")
+            att_rows = att_sheet.get_all_values()
+
+            for row_idx, row in enumerate(att_rows):
+                if len(row) >= 5 and row[1] == emp_id and row[4] == target_date:
+                    actual_row = row_idx + 1
+                    att_sheet.update_cell(actual_row, 7, data["time"])
+                    att_sheet.update_cell(actual_row, 8, "Present" if on_time else "Late")
+                    att_sheet.update_cell(actual_row, 9, data["work_update"])
+                    logger.info(f"Google Sheets: Updated Attendance_Log row {actual_row} for {emp_id}")
+                    break
+        except Exception:
+            pass
+
+        # If row not found, fall back to appending
+        if not updated:
+            logger.info(f"Row not found for {emp_id} on {target_date}, appending instead")
+            return _save_to_google_sheets_sync(data)
+
+        return True
+
+    except Exception as e:
+        logger.error(f"Google Sheets update failed: {e}", exc_info=True)
+        return False
+
+
+async def update_row_in_google_sheets(data: dict) -> bool:
+    """Update existing row in Google Sheets (non-blocking)."""
+    try:
+        return await asyncio.to_thread(_update_row_in_google_sheets_sync, data)
+    except Exception as e:
+        logger.error(f"Google Sheets update async failed: {e}", exc_info=True)
+        return False
+
+
 def _save_leave_to_google_sheets_sync(emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count):
     """Save leave entry to Google Sheets Leave Register (synchronous)."""
     if not config.GOOGLE_SHEET_ID:
