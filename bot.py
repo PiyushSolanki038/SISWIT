@@ -582,16 +582,7 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"ℹ️ Employee `{emp_id}` has not submitted anything today — no need to allow.", parse_mode="Markdown")
         return
 
-    # Check if user is admin — if so, approve directly without request flow
-    if requester_id in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
-        del context.bot_data["daily_log"][today_str][emp_id]
-        config.save_daily_log(context.bot_data["daily_log"])
-        staff_name = config.STAFF_RECORDS[emp_id]["name"]
-        await update.message.reply_text(f"✅ Employee `{emp_id}` ({staff_name}) can now re-submit today.", parse_mode="Markdown")
-        logger.info(f"Admin directly allowed re-submission for {emp_id}")
-        return
-
-    # ── Employee request: send approval to Owner & HR ──
+    # ── Send approval request to Owner & HR ──
     staff_name = config.STAFF_RECORDS[emp_id]["name"]
     group_name = update.message.chat.title or "Private Chat"
 
