@@ -34,6 +34,9 @@ UPDATE_PATTERN = re.compile(
     re.DOTALL,
 )
 
+# Admin IDs for /allow command
+ADMIN_IDS = [config.OWNER_CHAT_ID, config.HR_CHAT_ID]
+
 
 # ─── Excel Functions ─────────────────────────────────────────────────────────
 def save_to_excel(data: dict) -> bool:
@@ -372,6 +375,24 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     print(f"   📝 {work_update[:80]}...")
     print(f"{'='*50}")
 
+    # ── Check for Daily Submission ──
+    if "daily_log" not in context.bot_data:
+        context.bot_data["daily_log"] = {}
+
+    today_str = now.strftime("%Y-%m-%d")
+    if today_str not in context.bot_data["daily_log"]:
+        context.bot_data["daily_log"][today_str] = {}
+
+    if emp_id in context.bot_data["daily_log"][today_str]:
+        # Already submitted today
+        await update.message.reply_text(
+            f"❌ *Already Submitted*\n\n{emp_name} (`{emp_id}`) has already submitted an update for today. "
+            f"Please contact an admin if you need to re-submit.",
+            parse_mode="Markdown"
+        )
+        print(f"🛑 Duplicate submission blocked: {emp_id}")
+        return
+
     # ── Save to Excel ──
     excel_saved = save_to_excel(data)
 
@@ -400,7 +421,33 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     await send_personal_notification(context.bot, config.OWNER_CHAT_ID, data, "Owner")
     await send_personal_notification(context.bot, config.HR_CHAT_ID, data, "HR")
 
+    # ── Record Submission ──
+    context.bot_data["daily_log"][today_str][emp_id] = True
+
     print("✅ Update processing complete!\n")
+
+
+async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Allow an employee to re-submit today."""
+    user_id = str(update.effective_user.id)
+    if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+        return # Admins only
+
+    if not context.args:
+        await update.message.reply_text("Usage: `/allow EMP_ID`", parse_mode="Markdown")
+        return
+
+    emp_id = context.args[0].upper()
+    now = datetime.now(pytz.timezone(config.TIMEZONE))
+    today_str = now.strftime("%Y-%m-%d")
+
+    if "daily_log" in context.bot_data and today_str in context.bot_data["daily_log"]:
+        if emp_id in context.bot_data["daily_log"][today_str]:
+            del context.bot_data["daily_log"][today_str][emp_id]
+            await update.message.reply_text(f"✅ Employee `{emp_id}` can now re-submit today.", parse_mode="Markdown")
+            return
+
+    await update.message.reply_text(f"Employee `{emp_id}` has not submitted anything today.", parse_mode="Markdown")
 
 
 # ─── Bot Startup ─────────────────────────────────────────────────────────────
@@ -430,6 +477,7 @@ def main():
     # Add command handlers
     app.add_handler(CommandHandler("staff", staff_command))
     app.add_handler(CommandHandler("addstaff", addstaff_command))
+    app.add_handler(CommandHandler("allow", allow_command))
 
     # Handle all text messages (groups + private)
     app.add_handler(MessageHandler(filters.TEXT & ~filters.COMMAND, handle_message))

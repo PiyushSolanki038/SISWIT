@@ -28,8 +28,16 @@ To submit your work, enter your message in the following format:
 | :--- | :--- |
 | **`/staff`** | Shows the list of registered employees and instructions. |
 | **`/addstaff`**| Adds a new employee to the system (e.g., `/addstaff ID - Name - Dept`). |
+| **`/allow`**   | Allows an employee to submit a second update today (e.g., `/allow ID`). |
 
 ---
+
+## 🛡️ 4. Duplicate Prevention
+
+To keep the records clean, the bot only allows **one submission per employee per day**. 
+
+- If you try to submit a second time, the bot will block it and show an error.
+- **Admin bypass**: If an employee *must* re-submit (e.g., they made a mistake), an Owner or HR can use the `/allow ID` command to clear their daily log.
 
 ## � 4. Features & Automation
 
