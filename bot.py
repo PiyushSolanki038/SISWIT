@@ -106,9 +106,14 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /export — Get Excel file / Sheet link (DM)\n"
             "• /broadcast `Text` — Send announcement\n"
             "• /deadline `HH:MM` — Set submission deadline\n"
+            "\n📢 *Private Chat (DM Bot):*\n"
+            "• /announce `Text` — Send to group\n"
+            "• /dm `ID Text` — DM an employee\n"
+            "• /remind — Remind absent employees\n"
+            "• /warning `ID Reason` — Warn employee\n"
         )
         if user_id == str(config.OWNER_CHAT_ID):
-            msg += "• /sethr `CHAT_ID` — Change HR\n"
+            msg += "\n🔒 *Owner Only:*\n• /sethr `CHAT_ID` — Change HR\n"
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
