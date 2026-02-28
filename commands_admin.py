@@ -409,3 +409,253 @@ async def sethr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         parse_mode="Markdown",
     )
     logger.info(f"HR Chat ID changed to {new_hr_id}")
+
+
+# ─── Private Chat Commands (Owner & HR) ──────────────────────────────────────
+
+async def announce_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a styled announcement to the group chat (from private chat)."""
+    user_id = str(update.effective_user.id)
+    if not _is_admin(user_id):
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "❗ *Usage:* `/announce Your announcement message here`",
+            parse_mode="Markdown",
+        )
+        return
+
+    group_id = config.GROUP_CHAT_ID
+    if not group_id:
+        await update.message.reply_text(
+            "❌ Group chat ID not set. Send any message in the group first so the bot can detect it, "
+            "or set `GROUP_CHAT_ID` in your environment.",
+            parse_mode="Markdown",
+        )
+        return
+
+    text = " ".join(context.args)
+    admin_name = update.effective_user.first_name or "Admin"
+    role = "👑 Owner" if user_id == str(config.OWNER_CHAT_ID) else "👩‍💼 HR"
+
+    announcement = (
+        f"📢 *ANNOUNCEMENT*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{text}\n\n"
+        f"— _{role}: {admin_name}_\n"
+        f"📅 _{datetime.now(pytz.timezone(config.TIMEZONE)).strftime('%d %b %Y, %I:%M %p')}_"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=int(group_id), text=announcement, parse_mode="Markdown",
+        )
+        await update.message.reply_text("✅ Announcement sent to the group!", parse_mode="Markdown")
+        logger.info(f"Announcement by {admin_name}: {text[:50]}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send: {e}", parse_mode="Markdown")
+        logger.error(f"Announce failed: {e}")
+
+
+async def dm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send a private message to a specific employee."""
+    user_id = str(update.effective_user.id)
+    if not _is_admin(user_id):
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❗ *Usage:* `/dm EMP_ID Your message here`\n\n"
+            "Example: `/dm DEV01 Please submit your update ASAP`",
+            parse_mode="Markdown",
+        )
+        return
+
+    emp_id = context.args[0].upper()
+    message_text = " ".join(context.args[1:])
+
+    if emp_id not in config.STAFF_RECORDS:
+        await update.message.reply_text(f"❌ `{emp_id}` is not registered.", parse_mode="Markdown")
+        return
+
+    staff_info = config.STAFF_RECORDS[emp_id]
+    staff_name = staff_info["name"]
+    admin_name = update.effective_user.first_name or "Admin"
+    role = "👑 Owner" if user_id == str(config.OWNER_CHAT_ID) else "👩‍💼 HR"
+
+    # We need the employee's Telegram chat ID — check if stored
+    tg_id = staff_info.get("telegram_id", "")
+
+    if not tg_id:
+        await update.message.reply_text(
+            f"❌ No Telegram ID stored for `{emp_id}` ({staff_name}).\n\n"
+            f"_The employee needs to message the bot first, or use `/announce` to reach the group._",
+            parse_mode="Markdown",
+        )
+        return
+
+    dm_msg = (
+        f"📩 *Message from {role}*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"{message_text}\n\n"
+        f"— _{admin_name}_"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=int(tg_id), text=dm_msg, parse_mode="Markdown",
+        )
+        await update.message.reply_text(
+            f"✅ Message sent to *{staff_name}* (`{emp_id}`)!", parse_mode="Markdown",
+        )
+        logger.info(f"DM sent to {emp_id} by {admin_name}")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send DM: {e}", parse_mode="Markdown")
+        logger.error(f"DM failed for {emp_id}: {e}")
+
+
+async def remind_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send reminders to all employees who haven't submitted today."""
+    user_id = str(update.effective_user.id)
+    if not _is_admin(user_id):
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
+        return
+
+    group_id = config.GROUP_CHAT_ID
+    if not group_id:
+        await update.message.reply_text(
+            "❌ Group chat ID not set. Send any message in the group first.",
+            parse_mode="Markdown",
+        )
+        return
+
+    tz = pytz.timezone(config.TIMEZONE)
+    now = datetime.now(tz)
+    today_str = now.strftime("%Y-%m-%d")
+
+    if "daily_log" not in context.bot_data:
+        context.bot_data["daily_log"] = config.load_daily_log()
+
+    today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
+    leave_log = config.load_leave_log()
+    today_leaves = leave_log.get(today_str, {})
+
+    pending = []
+    for emp_id, info in config.STAFF_RECORDS.items():
+        if emp_id not in today_log and emp_id not in today_leaves:
+            pending.append(f"• `{emp_id}` — {info['name']}")
+
+    if not pending:
+        await update.message.reply_text(
+            "✅ *All employees have submitted today!* No reminders needed.",
+            parse_mode="Markdown",
+        )
+        return
+
+    deadline = config.get_deadline()
+    reminder_msg = (
+        f"⏰ *REMINDER: Submit Your Work Update!*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
+        f"🕐 *Deadline:* {deadline}\n\n"
+        f"The following employees have *NOT submitted* yet:\n\n"
+        + "\n".join(pending) +
+        f"\n\n📝 Please send your update now!\n"
+        f"_Format: `YOUR_ID Your work description`_"
+    )
+
+    try:
+        await context.bot.send_message(
+            chat_id=int(group_id), text=reminder_msg, parse_mode="Markdown",
+        )
+        await update.message.reply_text(
+            f"✅ Reminder sent to group! ({len(pending)} employees pending)",
+            parse_mode="Markdown",
+        )
+        logger.info(f"Reminder sent for {len(pending)} employees")
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to send reminder: {e}", parse_mode="Markdown")
+        logger.error(f"Remind failed: {e}")
+
+
+async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Send an official warning to an employee's DM."""
+    user_id = str(update.effective_user.id)
+    if not _is_admin(user_id):
+        await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
+        return
+
+    if len(context.args) < 2:
+        await update.message.reply_text(
+            "❗ *Usage:* `/warning EMP_ID Reason for warning`\n\n"
+            "Example: `/warning DEV01 Repeated late submissions this week`",
+            parse_mode="Markdown",
+        )
+        return
+
+    emp_id = context.args[0].upper()
+    reason = " ".join(context.args[1:])
+
+    if emp_id not in config.STAFF_RECORDS:
+        await update.message.reply_text(f"❌ `{emp_id}` is not registered.", parse_mode="Markdown")
+        return
+
+    staff_info = config.STAFF_RECORDS[emp_id]
+    staff_name = staff_info["name"]
+    admin_name = update.effective_user.first_name or "Admin"
+    role = "Owner" if user_id == str(config.OWNER_CHAT_ID) else "HR"
+    tz = pytz.timezone(config.TIMEZONE)
+    now = datetime.now(tz)
+
+    tg_id = staff_info.get("telegram_id", "")
+
+    warning_msg = (
+        f"⚠️ *OFFICIAL WARNING*\n"
+        f"━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        f"👤 *Employee:* {staff_name} (`{emp_id}`)\n"
+        f"📅 *Date:* {now.strftime('%d %b %Y')}\n\n"
+        f"📋 *Reason:*\n_{reason}_\n\n"
+        f"⚡ Please take this as a formal notice and ensure compliance going forward.\n\n"
+        f"— *{role}: {admin_name}*"
+    )
+
+    sent_to_employee = False
+    if tg_id:
+        try:
+            await context.bot.send_message(
+                chat_id=int(tg_id), text=warning_msg, parse_mode="Markdown",
+            )
+            sent_to_employee = True
+        except Exception as e:
+            logger.warning(f"Warning DM failed for {emp_id}: {e}")
+
+    # Also notify the other admin
+    for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+        if admin_id and str(admin_id) != user_id:
+            try:
+                await context.bot.send_message(
+                    chat_id=int(admin_id),
+                    text=f"📋 *Warning Issued*\n\n{admin_name} ({role}) warned `{emp_id}` ({staff_name})\n\n_Reason: {reason}_",
+                    parse_mode="Markdown",
+                )
+            except Exception:
+                pass
+
+    if sent_to_employee:
+        await update.message.reply_text(
+            f"✅ *Warning sent* to {staff_name} (`{emp_id}`) via DM!\n\n"
+            f"📋 Reason: _{reason}_",
+            parse_mode="Markdown",
+        )
+    else:
+        await update.message.reply_text(
+            f"⚠️ Warning recorded but could *not DM* {staff_name} (`{emp_id}`).\n"
+            f"_Employee hasn't started the bot yet._\n\n"
+            f"📋 Reason: _{reason}_",
+            parse_mode="Markdown",
+        )
+
+    logger.info(f"Warning issued to {emp_id} by {admin_name}: {reason[:50]}")

@@ -23,6 +23,7 @@ BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 # Chat IDs for personal notifications (get from @userinfobot on Telegram)
 OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "")
 HR_CHAT_ID = os.getenv("HR_CHAT_ID", "")
+GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID", "")  # Auto-detected from messages or set manually
 
 # ─── Excel Configuration ─────────────────────────────────────────────────────
 EXCEL_FILE = os.getenv("EXCEL_FILE", "employee_updates.xlsx")
@@ -130,6 +131,18 @@ def remove_staff_record(emp_id):
     if emp_id not in records:
         return False
     del records[emp_id]
+    try:
+        with open(STAFF_JSON_FILE, "w", encoding="utf-8") as f:
+            json.dump(records, f, indent=4)
+        return True
+    except Exception as e:
+        logger.warning(f"Error saving {STAFF_JSON_FILE}: {e}")
+        return False
+
+
+
+def save_staff_records(records):
+    """Save full staff records dict to file."""
     try:
         with open(STAFF_JSON_FILE, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=4)

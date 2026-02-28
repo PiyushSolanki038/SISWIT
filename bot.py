@@ -23,6 +23,7 @@ from commands_employee import mystatus_command, myprofile_command, edit_command,
 from commands_admin import (
     absent_command, late_command, history_command, weeklyreport_command,
     monthly_command, export_command, broadcast_command, deadline_command, sethr_command,
+    announce_command, dm_command, remind_command, warning_command,
 )
 from callbacks import allow_callback, edit_callback, leave_callback
 
@@ -352,6 +353,16 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     emp_name = staff_info["name"]
     department = staff_info["dept"]
 
+    # Auto-detect and store group chat ID
+    if update.message.chat.type in ["group", "supergroup"]:
+        config.GROUP_CHAT_ID = str(update.message.chat.id)
+
+    # Store employee's Telegram ID for /dm and /warning
+    user = update.message.from_user
+    if user and not staff_info.get("telegram_id"):
+        config.STAFF_RECORDS[emp_id]["telegram_id"] = str(user.id)
+        config.save_staff_records(config.STAFF_RECORDS)
+
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.now(tz)
 
@@ -489,6 +500,12 @@ def main():
     app.add_handler(CommandHandler("broadcast", broadcast_command))
     app.add_handler(CommandHandler("deadline", deadline_command))
     app.add_handler(CommandHandler("sethr", sethr_command))
+
+    # Private chat commands (Owner & HR)
+    app.add_handler(CommandHandler("announce", announce_command))
+    app.add_handler(CommandHandler("dm", dm_command))
+    app.add_handler(CommandHandler("remind", remind_command))
+    app.add_handler(CommandHandler("warning", warning_command))
 
     # Callback handlers for buttons
     app.add_handler(CallbackQueryHandler(allow_callback, pattern=r"^allow_"))
