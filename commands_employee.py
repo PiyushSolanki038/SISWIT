@@ -203,18 +203,23 @@ async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Request a leave day (sends approval to Owner & HR)."""
-    if len(context.args) < 3:
+    """Request a leave day (sends approval to Owner & HR).
+    Simple format: /leave EMP_ID Reason (defaults to today)
+    With date:     /leave EMP_ID tomorrow Reason
+                   /leave EMP_ID 05-03-2026 Reason
+    """
+    if len(context.args) < 2:
         await update.message.reply_text(
-            "❗ *Usage:* `/leave EMP_ID DD-MM-YYYY Reason`\n\n"
-            "📌 *Example:* `/leave DEV01 05-03-2026 Family function`",
+            "❗ *Usage:* `/leave EMP_ID Reason`\n\n"
+            "📌 *Examples:*\n"
+            "• `/leave DEV01 Feeling sick` ← today\n"
+            "• `/leave DEV01 tomorrow Doctor appointment`\n"
+            "• `/leave DEV01 05-03-2026 Family function`",
             parse_mode="Markdown",
         )
         return
 
     emp_id = context.args[0].upper()
-    leave_date = context.args[1]
-    reason = " ".join(context.args[2:])
     requester = update.effective_user
     requester_name = requester.first_name or "Unknown"
 
@@ -222,17 +227,33 @@ async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text(f"❌ Employee `{emp_id}` is not registered.", parse_mode="Markdown")
         return
 
-    # Validate date format
-    try:
-        datetime.strptime(leave_date, "%d-%m-%Y")
-    except ValueError:
-        await update.message.reply_text("❌ Invalid date format. Use `DD-MM-YYYY`.", parse_mode="Markdown")
-        return
+    # Smart date parsing
+    tz = pytz.timezone(config.TIMEZONE)
+    now = datetime.now(tz)
+    second_arg = context.args[1].lower() if len(context.args) > 1 else ""
+
+    if second_arg == "today":
+        leave_date = now.strftime("%d-%m-%Y")
+        reason = " ".join(context.args[2:]) if len(context.args) > 2 else "Personal"
+    elif second_arg == "tomorrow":
+        leave_date = (now + timedelta(days=1)).strftime("%d-%m-%Y")
+        reason = " ".join(context.args[2:]) if len(context.args) > 2 else "Personal"
+    else:
+        # Try to parse as date DD-MM-YYYY
+        try:
+            datetime.strptime(second_arg, "%d-%m-%Y")
+            leave_date = second_arg
+            reason = " ".join(context.args[2:]) if len(context.args) > 2 else "Personal"
+        except ValueError:
+            # Not a date — treat everything after EMP_ID as reason, default to today
+            leave_date = now.strftime("%d-%m-%Y")
+            reason = " ".join(context.args[1:])
 
     staff_name = config.STAFF_RECORDS[emp_id]["name"]
     dept = config.STAFF_RECORDS[emp_id]["dept"]
     group_name = update.message.chat.title or "Private Chat"
     chat_id = str(update.message.chat.id)
+    display_date = datetime.strptime(leave_date, "%d-%m-%Y").strftime("%d %b %Y")
 
     # Store pending leave
     if "pending_leaves" not in context.bot_data:
@@ -248,7 +269,7 @@ async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"👤 *Requested by:* {requester_name}\n"
         f"🆔 *Employee:* {staff_name} (`{emp_id}`)\n"
         f"🏢 *Department:* {dept}\n"
-        f"📅 *Leave Date:* {leave_date}\n"
+        f"📅 *Leave Date:* {display_date}\n"
         f"📝 *Reason:* {reason}\n"
         f"📍 *Group:* {group_name}\n\n"
         f"Do you approve this leave?"
@@ -272,7 +293,7 @@ async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 logger.warning(f"Failed to send leave request to {admin_id}: {e}")
 
     await update.message.reply_text(
-        f"📨 *Leave Request Sent!*\nYour leave request for `{emp_id}` on `{leave_date}` has been sent to Owner & HR.",
+        f"📨 *Leave Request Sent!*\nLeave for `{emp_id}` on *{display_date}* sent to Owner & HR for approval.",
         parse_mode="Markdown",
     )
     logger.info(f"Leave request for {emp_id} on {leave_date} by {requester_name}")
