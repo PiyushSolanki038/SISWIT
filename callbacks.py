@@ -175,8 +175,10 @@ async def leave_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         try:
             date_obj = datetime.strptime(leave_date, "%d-%m-%Y")
             log_key = date_obj.strftime("%Y-%m-%d")
+            month_key = date_obj.strftime("%Y-%m")
         except Exception:
             log_key = leave_date
+            month_key = leave_date[:7]
 
         if log_key not in leave_log:
             leave_log[log_key] = {}
@@ -185,10 +187,18 @@ async def leave_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
         reason = pending.get("reason", "N/A")
 
         leave_log[log_key][emp_id] = {"approved_by": admin_name, "reason": reason}
-        config.save_leave_log(leave_log)
 
-        # Count monthly leaves (including this one)
-        leave_count = count_monthly_leaves(emp_id, leave_date)
+        # Update monthly leave counter
+        if "_monthly_counts" not in leave_log:
+            leave_log["_monthly_counts"] = {}
+        if month_key not in leave_log["_monthly_counts"]:
+            leave_log["_monthly_counts"][month_key] = {}
+        if emp_id not in leave_log["_monthly_counts"][month_key]:
+            leave_log["_monthly_counts"][month_key][emp_id] = 0
+        leave_log["_monthly_counts"][month_key][emp_id] += 1
+        leave_count = leave_log["_monthly_counts"][month_key][emp_id]
+
+        config.save_leave_log(leave_log)
 
         # Save to Excel Leave Register (with deduction if > 3)
         save_leave_to_excel(emp_id, staff_name, dept, leave_date, reason, admin_name, leave_count)
