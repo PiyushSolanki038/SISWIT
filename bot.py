@@ -26,10 +26,6 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 # ─── Regex Pattern ───────────────────────────────────────────────────────────
-# Matches: EMP_ID - DEPARTMENT - Work description
-# EMP_ID: alphanumeric (e.g., PK042, EMP001)
-# DEPARTMENT: letters/numbers/spaces (e.g., SALES, HR, IT SUPPORT)
-# Work: everything after the second dash
 # Matches: EMP_ID Work description
 # EMP_ID: alphanumeric (e.g., PK01, DEV01)
 # Work: everything after the first space
