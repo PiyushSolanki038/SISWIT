@@ -203,7 +203,17 @@ async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
 
-    for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+    # If HR is requesting, only send to Owner (HR shouldn't approve their own)
+    # If Owner is requesting, only send to HR
+    requester_id = str(requester.id)
+    if requester_id == str(config.HR_CHAT_ID):
+        approval_targets = [config.OWNER_CHAT_ID]
+    elif requester_id == str(config.OWNER_CHAT_ID):
+        approval_targets = [config.HR_CHAT_ID]
+    else:
+        approval_targets = [config.OWNER_CHAT_ID, config.HR_CHAT_ID]
+
+    for admin_id in approval_targets:
         if admin_id:
             try:
                 await context.bot.send_message(
@@ -300,7 +310,17 @@ async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         ]
     ])
 
-    for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+    # If HR is requesting, only send to Owner (HR shouldn't approve their own)
+    # If Owner is requesting, only send to HR
+    requester_id = str(requester.id)
+    if requester_id == str(config.HR_CHAT_ID):
+        approval_targets = [config.OWNER_CHAT_ID]
+    elif requester_id == str(config.OWNER_CHAT_ID):
+        approval_targets = [config.HR_CHAT_ID]
+    else:
+        approval_targets = [config.OWNER_CHAT_ID, config.HR_CHAT_ID]
+
+    for admin_id in approval_targets:
         if admin_id:
             try:
                 await context.bot.send_message(
