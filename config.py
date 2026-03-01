@@ -107,6 +107,8 @@ def load_staff_records():
         "DEV04": {"name": "Adarsh", "dept": "DEVELOPER"},
         "MKT01": {"name": "Bipul", "dept": "MARKETING"},
         "MKT02": {"name": "Finney", "dept": "MARKETING"},
+        "MKT03": {"name": "Shivam", "dept": "MARKETING"},
+        "MKT04": {"name": "Amar", "dept": "MARKETING"},
         "FIN01": {"name": "Sahil", "dept": "FINANCE"},
     }
 
