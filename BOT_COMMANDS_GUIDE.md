@@ -1,75 +1,121 @@
 # 🤖 Work Update Bot — Commands Guide
 
-This guide provides a comprehensive list of all commands available in the Work Update Bot, categorized by user role and access level.
+---
+
+## 📝 How to Submit Attendance
+Just type in the group chat:
+```
+YOUR_ID Your work description
+```
+**Examples:**
+- `DEV01 Fixed the login page and tested it`
+- `MKT03 Created social media posts for campaign`
+- `HR01 Processed employee onboarding today`
+
+### ⏰ Attendance Deadline
+- **Before 1:00 PM** → Recorded for **previous day** (✅ On Time)
+- **After 1:00 PM** → Recorded for **current day** (✅ On Time)
+
+---
+
+## 👥 Registered Employees
+
+| ID | Name | Department |
+|:---|:---|:---|
+| DEV01 | Sunny | DEVELOPER |
+| DEV02 | Piyush | DEVELOPER |
+| DEV03 | Anand | DEVELOPER |
+| DEV04 | Adarsh | DEVELOPER |
+| MKT01 | Bipul | MARKETING |
+| MKT02 | Finney | MARKETING |
+| MKT03 | Shivam | MARKETING |
+| MKT04 | Amar | MARKETING |
+| FIN01 | Sahil | FINANCE |
+| HR01 | Shruti | HR |
+| HR02 | Pooja | HR |
 
 ---
 
 ## 📋 General Commands
-*Available to everyone in the group chat.*
+*Available to everyone.*
 
-| Command | Usage | Description |
+| Command | Usage | What It Does |
 |:---|:---|:---|
-| `/start` | `/start` | Displays the welcome message and basic instructions. |
-| `/help` | `/help` | Shows this help guide and a list of all available commands. |
-| `/staff` | `/staff` | Shows a list of all registered employees and their departments. |
-| `/report` | `/report` | Shows a quick summary of today's attendance status. |
+| `/start` | `/start` | Welcome message + how to submit |
+| `/help` | `/help` | Shows all available commands |
+| `/staff` | `/staff` | Lists all registered employees |
+| `/report` | `/report` | Today's attendance summary |
 
 ---
 
 ## 👤 Employee Commands
-*Used by employees to manage their own updates and profile.*
 
-| Command | Usage | Description |
+| Command | Usage | What It Does |
 |:---|:---|:---|
-| `/mystatus` | `/mystatus EMP_ID` | Sends your weekly submission history to your **Private DM**. |
-| `/myprofile` | `/myprofile EMP_ID` | Sends your full profile (total days, leaves, etc.) to your **Private DM**. |
-| `/edit` | `/edit EMP_ID New Text` | Sends a request to Owner/HR to edit your last submission. |
-| `/leave` | `/leave EMP_ID [Date] Reason` | Requests leave approval. Date can be `today`, `tomorrow`, or `DD-MM-YYYY`. |
+| `/mystatus` | `/mystatus DEV01` | Your 7-day attendance history → **DM** |
+| `/myprofile` | `/myprofile DEV01` | Your profile + total submissions → **DM** |
+| `/edit` | `/edit DEV01 New text` | Request to edit your last update (needs approval) |
+| `/leave` | `/leave DEV01 Sick` | Request leave (needs approval) |
+
+**Leave examples:**
+- `/leave DEV01 Feeling sick` → today
+- `/leave DEV01 tomorrow Doctor visit`
+- `/leave DEV01 05-03-2026 Family function`
 
 ---
 
-## 🛠️ Admin Commands (Group Chat)
-*Accessible only to the **Owner** and **HR**. Can be used in the group chat.*
+## 🛠️ Admin Commands — Group Chat
+*Owner & HR only.*
 
-| Command | Usage | Description |
+| Command | Usage | What It Does |
 |:---|:---|:---|
-| `/absent` | `/absent` | Lists all employees who have not submitted their update today. |
-| `/late` | `/late` | Lists employees who submitted after the official deadline. |
-| `/addstaff` | `/addstaff ID Name Dept` | Registers a new employee into the system. |
-| `/removestaff`| `/removestaff ID` | Removes an employee from the system. |
-| `/deadline` | `/deadline HH:MM` | Sets the daily submission deadline (e.g., `/deadline 11:30`). |
-| `/sethr` | `/sethr CHAT_ID` | (Owner Only) Sets or updates the HR administrator's Chat ID. |
-| `/allow` | `/allow EMP_ID` | Allows an employee to re-submit their attendance for today. |
+| `/absent` | `/absent` | Lists who hasn't submitted today |
+| `/late` | `/late` | Lists late submissions |
+| `/addstaff` | `/addstaff ID Name Dept` | Register new employee |
+| `/removestaff` | `/removestaff ID` | Remove employee |
+| `/allow` | `/allow DEV01` | Allow re-submission (1 time only) |
+| `/deadline` | `/deadline 13:00` | Set submission deadline |
+| `/sethr` | `/sethr CHAT_ID` | Change HR (Owner only) |
+| `/broadcast` | `/broadcast Message` | Send announcement in group |
 
 ---
 
-## 📊 Admin Reports (Sent to Private DM)
-*These commands process large amounts of data and send the results to the admin's DM to keep the group chat clean.*
+## 📊 Admin Reports — Sent to DM
+*Large reports go to your private DM to keep group clean.*
 
-| Command | Usage | Description |
+| Command | Usage | What It Does |
 |:---|:---|:---|
-| `/history` | `/history EMP_ID` | Shows the last 7 days of detailed history for a specific employee. |
-| `/weeklyreport`| `/weeklyreport` | Sends a visual grid (✅/❌) of everyone's performance for the week. |
-| `/monthly` | `/monthly` | Sends a monthly summary with performance bars and leave counts. |
-| `/export` | `/export` | Sends the latest **Excel file** and the **Google Sheets link**. |
+| `/history` | `/history DEV01` | 7-day detailed history of any employee |
+| `/weeklyreport` | `/weeklyreport` | Visual grid ✅/❌ for all employees |
+| `/monthly` | `/monthly` | Monthly stats with progress bars |
+| `/export` | `/export` | Get Excel file + Google Sheets link |
 
 ---
 
-## 🔐 Private Chat Special Commands (Owner & HR Only)
-*These commands work **only when sent privately** to the bot. They allow admins to manage the team and communicate effectively.*
+## 🔐 Private Chat Commands — DM the Bot
+*Owner & HR only. Send these in your private chat with the bot.*
 
-| Command | Usage | Description |
+| Command | Usage | What It Does |
 |:---|:---|:---|
-| `/announce` | `/announce Message` | Sends a professionally styled 📢 announcement to the group chat. |
-| `/dm` | `/dm EMP_ID Message` | Sends a private message from the admin to the employee's DM. |
-| `/remind` | `/remind` | Scans for pending submissions and sends a group-wide reminder. |
-| `/warning` | `/warning EMP_ID Reason`| Sends a formal ⚠️ **OFFICIAL WARNING** to an employee's DM. |
+| `/announce` | `/announce Tomorrow holiday` | Sends 📢 announcement to group |
+| `/dm` | `/dm DEV01 Submit ASAP` | Private message to an employee |
+| `/remind` | `/remind` | Remind all who haven't submitted |
+| `/warning` | `/warning DEV01 Late 3x` | Send ⚠️ official warning to employee |
 
 ---
 
-## 💡 Pro Tips
+## � Approval Rules
 
-1. **Format:** Always use your employee ID (e.g., `DEV01`) for commands that require it.
-2. **Privacy:** The bot sends reports to your DM. Make sure you have **started a chat** with the bot privately for this to work.
-3. **Deadlines:** Submissions after the deadline are automatically marked as `⏰ Late` in Excel and Google Sheets.
-4. **Auto-Save:** Every update is instantly saved to both the local Excel file and the cloud Google Sheet.
+| Who Requests | Approval Goes To |
+|:---|:---|
+| Regular Employee | Both Owner & HR |
+| HR (Shruti/Pooja) | **Owner only** |
+| Owner | **HR only** |
+
+---
+
+## 💡 Tips
+1. **All 7 days** are working days (no weekends)
+2. **DM the bot first** — tap Start in private chat so it can send you messages
+3. **Data is saved** to Excel file + Google Sheets automatically
+4. **Group Chat ID** is auto-detected when anyone sends a message
