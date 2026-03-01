@@ -64,10 +64,18 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message."""
     msg = (
         "👋 *Welcome to the Employee Work Update Bot!*\n\n"
-        "📝 *Submit your daily update:*\n"
+        "📝 *How to submit your daily attendance:*\n"
+        "━━━━━━━━━━━━━━━━━━━━━━\n\n"
+        "✅ *Step 1:* Type your Employee ID\n"
+        "✅ *Step 2:* Add a space, then write what you did today\n"
+        "✅ *Step 3:* Send it in the group!\n\n"
+        "📌 *Format:*\n"
         "`YOUR_ID Your work description`\n\n"
-        "📌 *Example:*\n"
-        "`DEV01 Fixed the login page and tested it`\n\n"
+        "📌 *Examples:*\n"
+        "• `DEV01 Fixed the login page and tested it`\n"
+        "• `MKT03 Created social media posts for campaign`\n"
+        "• `FIN01 Prepared monthly expense report`\n\n"
+        "⏰ *Deadline:* Submit before the daily deadline to be marked On Time!\n\n"
         "💡 Use /help to see all commands."
     )
     await update.message.reply_text(msg, parse_mode="Markdown")
@@ -106,14 +114,17 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /export — Get Excel file / Sheet link (DM)\n"
             "• /broadcast `Text` — Send announcement\n"
             "• /deadline `HH:MM` — Set submission deadline\n"
-            "\n📢 *Private Chat (DM Bot):*\n"
-            "• /announce `Text` — Send to group\n"
-            "• /dm `ID Text` — DM an employee\n"
-            "• /remind — Remind absent employees\n"
-            "• /warning `ID Reason` — Warn employee\n"
         )
         if user_id == str(config.OWNER_CHAT_ID):
-            msg += "\n🔒 *Owner Only:*\n• /sethr `CHAT_ID` — Change HR\n"
+            msg += "• /sethr `CHAT_ID` — Change HR\n"
+
+        msg += (
+            "\n🔐 *Private Chat (DM the bot):*\n"
+            "• /announce `Text` — Send announcement to group\n"
+            "• /dm `ID Message` — Message an employee privately\n"
+            "• /remind — Remind all who haven't submitted\n"
+            "• /warning `ID Reason` — Send official warning\n"
+        )
 
     await update.message.reply_text(msg, parse_mode="Markdown")
 
