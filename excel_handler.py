@@ -425,11 +425,198 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
         except Exception:
             pass  # Attendance_Log doesn't exist or different format — skip
 
+        # Update summary sheets
+        try:
+            _update_google_sheets_summaries(spreadsheet, month_name)
+        except Exception as e:
+            logger.warning(f"Summary sheets update failed (non-critical): {e}")
+
         return True
 
     except Exception as e:
         logger.error(f"Google Sheets save failed: {e}", exc_info=True)
         return False
+
+
+def _update_google_sheets_summaries(spreadsheet, month_name):
+    """Update Daily Summary, Department Summary, and Employee Monthly Report sheets."""
+    import pytz
+    tz = pytz.timezone(config.TIMEZONE)
+    now = datetime.now(tz)
+    today_str = now.strftime("%d-%m-%Y")
+
+    # Read all data from the monthly sheet
+    try:
+        sheet = spreadsheet.worksheet(month_name)
+        all_rows = sheet.get_all_values()
+    except Exception:
+        return
+
+    if len(all_rows) < 2:
+        return
+
+    # Parse attendance data
+    daily_data = {}     # date -> {emp_id: {time, work, on_time}}
+    emp_monthly = {}    # emp_id -> {days: int, late: int}
+    dept_stats = {}     # dept -> {total: int, submitted: int}
+
+    for row in all_rows[1:]:
+        if len(row) < 12:
+            continue
+        emp_id = row[1].strip().upper() if row[1] else ""
+        date = row[5].strip() if row[5] else ""
+        time_str = row[7].strip() if row[7] else ""
+        work = row[8].strip() if row[8] else ""
+        on_time_val = row[11].strip() if len(row) > 11 and row[11] else ""
+        dept = row[2].strip() if row[2] else ""
+
+        if not emp_id or not date or emp_id not in config.STAFF_RECORDS:
+            continue
+
+        # Daily data
+        if date not in daily_data:
+            daily_data[date] = {}
+        daily_data[date][emp_id] = {"time": time_str, "work": work, "on_time": on_time_val}
+
+        # Monthly per-employee
+        if emp_id not in emp_monthly:
+            emp_monthly[emp_id] = {"days": 0, "late": 0}
+        emp_monthly[emp_id]["days"] += 1
+        if "Late" in on_time_val:
+            emp_monthly[emp_id]["late"] += 1
+
+    # ─── 1. Daily Summary ────────────────────────────────────────────
+    try:
+        ds_name = "Daily Summary"
+        try:
+            ds_sheet = spreadsheet.worksheet(ds_name)
+            ds_sheet.clear()
+        except Exception:
+            ds_sheet = spreadsheet.add_worksheet(title=ds_name, rows=100, cols=7)
+
+        ds_headers = ["Date", "Total Staff", "Submitted", "Absent", "Attendance %", "Submitted IDs", "Absent IDs"]
+        ds_rows = [ds_headers]
+
+        # Get unique dates sorted
+        sorted_dates = sorted(daily_data.keys(), key=lambda d: datetime.strptime(d, "%d-%m-%Y"), reverse=True)
+
+        for date in sorted_dates[:15]:  # Last 15 days
+            submitted_ids = list(daily_data[date].keys())
+            all_ids = list(config.STAFF_RECORDS.keys())
+            absent_ids = [eid for eid in all_ids if eid not in submitted_ids]
+            total = len(all_ids)
+            submitted = len(submitted_ids)
+            absent = total - submitted
+            pct = round((submitted / total) * 100, 1) if total > 0 else 0
+
+            ds_rows.append([
+                date, str(total), str(submitted), str(absent), f"{pct}%",
+                ", ".join(submitted_ids), ", ".join(absent_ids)
+            ])
+
+        ds_sheet.update(range_name="A1", values=ds_rows)
+
+        # Format header
+        ds_sheet.format("A1:G1", {
+            "backgroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361},
+            "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True, "fontSize": 11},
+            "horizontalAlignment": "CENTER",
+        })
+
+        logger.info(f"Updated Daily Summary with {len(sorted_dates)} dates")
+    except Exception as e:
+        logger.warning(f"Daily Summary update failed: {e}")
+
+    # ─── 2. Department Summary ───────────────────────────────────────
+    try:
+        dept_name = "Department Summary"
+        try:
+            dept_sheet = spreadsheet.worksheet(dept_name)
+            dept_sheet.clear()
+        except Exception:
+            dept_sheet = spreadsheet.add_worksheet(title=dept_name, rows=50, cols=6)
+
+        dept_headers = ["Department", "Total Staff", "Total Submissions", "Avg Submissions/Employee", "Employees", "Month"]
+        dept_rows = [dept_headers]
+
+        # Group by department
+        dept_info = {}
+        for emp_id, info in config.STAFF_RECORDS.items():
+            d = info["dept"]
+            if d not in dept_info:
+                dept_info[d] = {"staff": [], "submissions": 0}
+            dept_info[d]["staff"].append(emp_id)
+            dept_info[d]["submissions"] += emp_monthly.get(emp_id, {}).get("days", 0)
+
+        for dept, info in sorted(dept_info.items()):
+            total_staff = len(info["staff"])
+            avg = round(info["submissions"] / total_staff, 1) if total_staff > 0 else 0
+            dept_rows.append([
+                dept, str(total_staff), str(info["submissions"]),
+                str(avg), ", ".join(info["staff"]), month_name
+            ])
+
+        dept_sheet.update(range_name="A1", values=dept_rows)
+
+        dept_sheet.format("A1:F1", {
+            "backgroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361},
+            "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True, "fontSize": 11},
+            "horizontalAlignment": "CENTER",
+        })
+
+        logger.info(f"Updated Department Summary with {len(dept_info)} departments")
+    except Exception as e:
+        logger.warning(f"Department Summary update failed: {e}")
+
+    # ─── 3. Employee Monthly Report ──────────────────────────────────
+    try:
+        emp_name = "Employee Monthly Report"
+        try:
+            emp_sheet = spreadsheet.worksheet(emp_name)
+            emp_sheet.clear()
+        except Exception:
+            emp_sheet = spreadsheet.add_worksheet(title=emp_name, rows=100, cols=7)
+
+        # Count leaves from leave log
+        leave_log = config.load_leave_log()
+        leave_counts = {}
+        for date_key, leaves in leave_log.items():
+            if date_key.startswith("_"):
+                continue
+            if isinstance(leaves, dict):
+                for eid in leaves:
+                    if eid in config.STAFF_RECORDS:
+                        leave_counts[eid] = leave_counts.get(eid, 0) + 1
+
+        emp_headers = ["Employee ID", "Name", "Department", "Days Submitted", "Days Absent", "Leaves", "Attendance %"]
+        emp_rows = [emp_headers]
+
+        # Count working days this month
+        first_day = now.replace(day=1)
+        working_days = now.day  # All days are working
+
+        for emp_id, info in sorted(config.STAFF_RECORDS.items()):
+            stats = emp_monthly.get(emp_id, {"days": 0, "late": 0})
+            leaves = leave_counts.get(emp_id, 0)
+            absent = max(0, working_days - stats["days"] - leaves)
+            pct = round((stats["days"] / working_days) * 100, 1) if working_days > 0 else 0
+
+            emp_rows.append([
+                emp_id, info["name"], info["dept"],
+                str(stats["days"]), str(absent), str(leaves), f"{pct}%"
+            ])
+
+        emp_sheet.update(range_name="A1", values=emp_rows)
+
+        emp_sheet.format("A1:G1", {
+            "backgroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361},
+            "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True, "fontSize": 11},
+            "horizontalAlignment": "CENTER",
+        })
+
+        logger.info(f"Updated Employee Monthly Report with {len(config.STAFF_RECORDS)} employees")
+    except Exception as e:
+        logger.warning(f"Employee Monthly Report update failed: {e}")
 
 
 async def save_to_google_sheets(data: dict) -> bool:
