@@ -151,8 +151,6 @@ async def history_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             msg += f"✅ {day_name} {time_str}\n   _{work[:60]}_\n"
         elif emp_id in day_leaves:
             msg += f"🏖️ {day_name} — On Leave\n"
-        elif day.weekday() >= 5:
-            msg += f"🔵 {day_name} — Weekend\n"
         else:
             msg += f"❌ {day_name} — Absent\n"
 
@@ -203,14 +201,12 @@ async def weeklyreport_command(update: Update, context: ContextTypes.DEFAULT_TYP
                 submitted += 1
             elif emp_id in day_leaves:
                 row += " 🏖 "
-            elif day.weekday() >= 5:
-                row += " 🔵 "
             else:
                 row += " ❌ "
         row += f" ({submitted}/7)"
         msg += row + "\n"
 
-    msg += "\n✅=Submitted  ❌=Absent  🏖=Leave  🔵=Weekend"
+    msg += "\n✅=Submitted  ❌=Absent  🏖=Leave"
 
     try:
         await context.bot.send_message(chat_id=update.effective_user.id, text=msg, parse_mode="Markdown")
@@ -234,13 +230,12 @@ async def monthly_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     daily_log = config.load_daily_log()
     leave_log = config.load_leave_log()
 
-    # Count working days this month (exclude weekends)
+    # Count all days this month (all days are working — no weekends)
     first_day = now.replace(day=1)
     working_days = 0
     current = first_day
     while current <= now:
-        if current.weekday() < 5:
-            working_days += 1
+        working_days += 1
         current += timedelta(days=1)
 
     msg = f"📊 *Monthly Report — {now.strftime('%B %Y')}*\n"

@@ -40,24 +40,31 @@ async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "daily_log" not in context.bot_data:
         context.bot_data["daily_log"] = config.load_daily_log()
 
-    # Check last 7 days
+    # Also try to load from Google Sheets for real-time data on Railway
+    daily_log = context.bot_data.get("daily_log", {})
+
+    # Check last 7 days (all days are working — no weekends)
     days_status = []
     submitted_count = 0
+    leave_log = config.load_leave_log()
+
     for i in range(6, -1, -1):
         day = now - timedelta(days=i)
         day_str = day.strftime("%Y-%m-%d")
         day_name = day.strftime("%a %d %b")
-        day_log = context.bot_data.get("daily_log", {}).get(day_str, {})
+        day_log = daily_log.get(day_str, {})
+        day_leaves = leave_log.get(day_str, {})
 
         if emp_id in day_log:
-            days_status.append(f"✅ {day_name} — Submitted")
+            entry = day_log[emp_id]
+            time_str = entry.get("time", "") if isinstance(entry, dict) else ""
+            work = entry.get("work", "") if isinstance(entry, dict) else ""
+            days_status.append(f"✅ {day_name} — Submitted {time_str}")
             submitted_count += 1
+        elif emp_id in day_leaves:
+            days_status.append(f"🏖️ {day_name} — On Leave")
         else:
-            # Check if it's a weekend
-            if day.weekday() >= 5:  # Sat/Sun
-                days_status.append(f"🔵 {day_name} — Weekend")
-            else:
-                days_status.append(f"❌ {day_name} — Not Submitted")
+            days_status.append(f"❌ {day_name} — Not Submitted")
 
     message = (
         f"📊 *Weekly Status — {staff_info['name']}*\n"
