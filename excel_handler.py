@@ -614,3 +614,108 @@ async def save_leave_to_google_sheets(emp_id, emp_name, dept, leave_date, reason
     except Exception as e:
         logger.error(f"Google Sheets leave async failed: {e}", exc_info=True)
         return False
+
+
+# ─── Read Attendance from Google Sheets ──────────────────────────────────────
+
+def _load_attendance_from_sheets_sync():
+    """Read all attendance data from Google Sheets and return as daily_log dict.
+    
+    Returns dict like: { "2026-03-01": { "DEV01": {"work": "...", "time": "..."} } }
+    """
+    if not config.GOOGLE_SHEET_ID or not config.GOOGLE_CREDS_FILE:
+        return {}
+
+    try:
+        import gspread
+        from google.oauth2.service_account import Credentials
+
+        scopes = [
+            "https://www.googleapis.com/auth/spreadsheets",
+            "https://www.googleapis.com/auth/drive",
+        ]
+
+        creds = Credentials.from_service_account_file(config.GOOGLE_CREDS_FILE, scopes=scopes)
+        client = gspread.authorize(creds)
+        spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
+
+        daily_log = {}
+
+        # Read from the current month sheet
+        month_name = _get_month_sheet_name()
+        sheets_to_read = [month_name]
+
+        # Also try previous month (for recent history at start of month)
+        try:
+            import pytz
+            tz = pytz.timezone(config.TIMEZONE)
+            now = datetime.now(tz)
+            if now.day <= 7:
+                from datetime import timedelta as td
+                prev_month = (now.replace(day=1) - td(days=1))
+                sheets_to_read.append(prev_month.strftime("%b %Y"))
+        except Exception:
+            pass
+
+        for sheet_name in sheets_to_read:
+            try:
+                sheet = spreadsheet.worksheet(sheet_name)
+                rows = sheet.get_all_values()
+
+                if len(rows) < 2:
+                    continue
+
+                # Headers: Sr No, Employee ID, Department, Employee Name,
+                #          Telegram Username, Date, Day, Time,
+                #          Work Update, Group Name, Status, On Time
+                for row in rows[1:]:
+                    if len(row) < 9:
+                        continue
+
+                    emp_id = row[1].strip().upper() if row[1] else ""
+                    date_str = row[5].strip() if row[5] else ""
+                    time_str = row[7].strip() if row[7] else ""
+                    work = row[8].strip() if row[8] else ""
+
+                    if not emp_id or not date_str or emp_id not in config.STAFF_RECORDS:
+                        continue
+
+                    # Skip separator rows (they start with 📅)
+                    if emp_id.startswith("📅") or row[0].startswith("📅"):
+                        continue
+
+                    # Convert date from DD-MM-YYYY to YYYY-MM-DD
+                    try:
+                        date_obj = datetime.strptime(date_str, "%d-%m-%Y")
+                        log_key = date_obj.strftime("%Y-%m-%d")
+                    except Exception:
+                        continue
+
+                    if log_key not in daily_log:
+                        daily_log[log_key] = {}
+
+                    daily_log[log_key][emp_id] = {
+                        "work": work,
+                        "time": time_str,
+                        "late": False,
+                    }
+
+            except Exception as e:
+                logger.warning(f"Could not read sheet '{sheet_name}': {e}")
+                continue
+
+        logger.info(f"Loaded {sum(len(v) for v in daily_log.values())} entries from Google Sheets")
+        return daily_log
+
+    except Exception as e:
+        logger.error(f"Failed to load from Google Sheets: {e}", exc_info=True)
+        return {}
+
+
+async def load_attendance_from_google_sheets():
+    """Load attendance from Google Sheets in a background thread (non-blocking)."""
+    try:
+        return await asyncio.to_thread(_load_attendance_from_sheets_sync)
+    except Exception as e:
+        logger.error(f"Google Sheets read async failed: {e}", exc_info=True)
+        return {}

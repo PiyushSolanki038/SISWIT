@@ -18,7 +18,7 @@ from telegram.ext import (
 )
 
 import config
-from excel_handler import save_to_excel, save_to_google_sheets, update_row_in_google_sheets
+from excel_handler import save_to_excel, save_to_google_sheets, update_row_in_google_sheets, load_attendance_from_google_sheets
 from commands_employee import mystatus_command, myprofile_command, edit_command, leave_command
 from commands_admin import (
     absent_command, late_command, history_command, weeklyreport_command,
@@ -490,6 +490,30 @@ def main():
     logger.info("=" * 55)
 
     app = ApplicationBuilder().token(config.BOT_TOKEN).build()
+
+    # Load attendance from Google Sheets on startup (for real-time data)
+    async def post_init(application):
+        """Load attendance history from Google Sheets on bot startup."""
+        logger.info("Loading attendance from Google Sheets...")
+        try:
+            sheets_log = await load_attendance_from_google_sheets()
+            if sheets_log:
+                if "daily_log" not in application.bot_data:
+                    application.bot_data["daily_log"] = {}
+                # Merge: sheets data as base, in-memory overwrites
+                for date_key, entries in sheets_log.items():
+                    if date_key not in application.bot_data["daily_log"]:
+                        application.bot_data["daily_log"][date_key] = {}
+                    for emp_id, data in entries.items():
+                        if emp_id not in application.bot_data["daily_log"][date_key]:
+                            application.bot_data["daily_log"][date_key][emp_id] = data
+                logger.info(f"Loaded {sum(len(v) for v in sheets_log.values())} entries from Google Sheets")
+            else:
+                logger.info("No data from Google Sheets (empty or not available)")
+        except Exception as e:
+            logger.warning(f"Could not load from Google Sheets: {e}")
+
+    app.post_init = post_init
 
     # Basic commands
     app.add_handler(CommandHandler("start", start_command))
