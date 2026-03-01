@@ -386,28 +386,28 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     username = user.username if user.username else user.first_name or "Unknown"
     group_name = update.message.chat.title or ("Private Chat" if update.message.chat.type == "private" else "")
 
-    # ─── Grace Period: 12:00 AM to 1:00 AM → count as yesterday (Late) ────
-    if now.hour < 1:
-        # Midnight grace period — record for previous day
+    # ─── Attendance Day Logic ───────────────────────────────────────────────
+    # Before 1:00 PM → attendance counts for PREVIOUS day (On Time)
+    # After  1:00 PM → attendance counts for CURRENT day (new day starts)
+    CUTOFF_HOUR = 13  # 1:00 PM
+
+    if now.hour < CUTOFF_HOUR:
+        # Before 1 PM — this is yesterday's attendance, On Time
         record_date = now - timedelta(days=1)
-        is_late = True
-        grace_note = f"⏰ _Recorded for {record_date.strftime('%d %b')} (late submission)_"
+        is_late = False
+        grace_note = f"📅 _Recorded for {record_date.strftime('%d %b %Y')} (On Time)_"
     else:
+        # After 1 PM — new day's attendance starts
         record_date = now
+        is_late = False
         grace_note = ""
-        # Normal late check against deadline
-        deadline = config.get_deadline()
-        try:
-            dl_h, dl_m = map(int, deadline.split(":"))
-            is_late = now.hour > dl_h or (now.hour == dl_h and now.minute > dl_m)
-        except Exception:
-            is_late = False
 
     data = {
         "emp_id": emp_id, "department": department, "emp_name": emp_name,
         "username": username, "date": record_date.strftime("%d-%m-%Y"),
         "day": record_date.strftime("%A"), "time": now.strftime("%I:%M %p"),
         "work_update": work_update, "group_name": group_name,
+        "on_time": "Yes",
     }
 
     logger.info(f"Update: {emp_id} | {department} | {emp_name}")
