@@ -78,7 +78,10 @@ async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📩 Status sent to your DM!", parse_mode="Markdown")
     except Exception as e:
         await update.message.reply_text(
-            f"⚠️ Couldn't send DM. Please start a private chat with the bot first.\n\n{message}",
+            "⚠️ *Couldn't send DM!*\n\nPlease start a private chat with the bot first:\n"
+            "1️⃣ Search for the bot in Telegram\n"
+            "2️⃣ Tap *Start*\n"
+            "3️⃣ Then try `/mystatus` again here",
             parse_mode="Markdown",
         )
 
@@ -86,7 +89,7 @@ async def mystatus_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 
 async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Show the employee's profile (sent to DM)."""
+    """Show the employee's profile (sent to DM only)."""
     if not context.args:
         await update.message.reply_text("❗ *Usage:* `/myprofile EMP_ID`", parse_mode="Markdown")
         return
@@ -99,8 +102,11 @@ async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     staff_info = config.STAFF_RECORDS[emp_id]
 
-    # Count total submissions
-    daily_log = config.load_daily_log()
+    # Count total submissions (use in-memory data first, fallback to file)
+    if "daily_log" not in context.bot_data:
+        context.bot_data["daily_log"] = config.load_daily_log()
+    daily_log = context.bot_data["daily_log"]
+
     total_submissions = 0
     for date_str, log in daily_log.items():
         if emp_id in log:
@@ -121,7 +127,6 @@ async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         f"🏢 *Department:* {staff_info['dept']}\n"
         f"📊 *Total Submissions:* {total_submissions}\n"
         f"🏖️ *Total Leaves:* {total_leaves}\n"
-        f"⏰ *Deadline:* {config.get_deadline()}\n"
     )
 
     try:
@@ -133,7 +138,13 @@ async def myprofile_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if update.message.chat.type != "private":
             await update.message.reply_text("📩 Profile sent to your DM!", parse_mode="Markdown")
     except Exception:
-        await update.message.reply_text(message, parse_mode="Markdown")
+        await update.message.reply_text(
+            "⚠️ *Couldn't send DM!*\n\nPlease start a private chat with the bot first:\n"
+            "1️⃣ Search for the bot in Telegram\n"
+            "2️⃣ Tap *Start*\n"
+            "3️⃣ Then try `/myprofile` again here",
+            parse_mode="Markdown",
+        )
 
     logger.info(f"Profile checked for {emp_id}")
 
