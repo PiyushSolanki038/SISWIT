@@ -21,9 +21,23 @@ logger = logging.getLogger(__name__)
 BOT_TOKEN = os.getenv("BOT_TOKEN", "")
 
 # Chat IDs for personal notifications (get from @userinfobot on Telegram)
-OWNER_CHAT_ID = os.getenv("OWNER_CHAT_ID", "")
+# OWNER_CHAT_ID supports multiple comma-separated IDs
+_OWNER_IDS_RAW = os.getenv("OWNER_CHAT_ID", "")
+OWNER_CHAT_IDS = [x.strip() for x in _OWNER_IDS_RAW.split(",") if x.strip()]
+OWNER_CHAT_ID = OWNER_CHAT_IDS[0] if OWNER_CHAT_IDS else ""  # Primary owner (backward compat)
 HR_CHAT_ID = os.getenv("HR_CHAT_ID", "")
 GROUP_CHAT_ID = os.getenv("GROUP_CHAT_ID", "")  # Auto-detected from messages or set manually
+
+
+def is_owner(user_id):
+    """Check if user_id is any of the owner IDs."""
+    return str(user_id) in OWNER_CHAT_IDS
+
+
+def is_admin(user_id):
+    """Check if user_id is Owner or HR."""
+    uid = str(user_id)
+    return uid in OWNER_CHAT_IDS or uid == str(HR_CHAT_ID)
 
 # ─── Excel Configuration ─────────────────────────────────────────────────────
 EXCEL_FILE = os.getenv("EXCEL_FILE", "employee_updates.xlsx")

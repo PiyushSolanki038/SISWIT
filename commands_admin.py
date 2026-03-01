@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 
 def _is_admin(user_id: str) -> bool:
     """Check if the user is Owner or HR."""
-    return user_id in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]
+    return config.is_admin(user_id)
 
 
 async def absent_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -383,7 +383,7 @@ async def sethr_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
 
     # Owner only
-    if user_id != str(config.OWNER_CHAT_ID):
+    if user_id != str(config.OWNER_CHAT_ID) and not config.is_owner(user_id):
         await update.message.reply_text("🚫 *Permission Denied:* Only the Owner can change HR.", parse_mode="Markdown")
         return
 
@@ -433,7 +433,7 @@ async def announce_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     text = " ".join(context.args)
     admin_name = update.effective_user.first_name or "Admin"
-    role = "👑 Owner" if user_id == str(config.OWNER_CHAT_ID) else "👩‍💼 HR"
+    role = "👑 Owner" if config.is_owner(user_id) else "👩‍💼 HR"
 
     announcement = (
         f"📢 *ANNOUNCEMENT*\n"
@@ -479,7 +479,7 @@ async def dm_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     staff_info = config.STAFF_RECORDS[emp_id]
     staff_name = staff_info["name"]
     admin_name = update.effective_user.first_name or "Admin"
-    role = "👑 Owner" if user_id == str(config.OWNER_CHAT_ID) else "👩‍💼 HR"
+    role = "👑 Owner" if config.is_owner(user_id) else "👩‍💼 HR"
 
     # We need the employee's Telegram chat ID — check if stored
     tg_id = staff_info.get("telegram_id", "")
@@ -601,7 +601,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     staff_info = config.STAFF_RECORDS[emp_id]
     staff_name = staff_info["name"]
     admin_name = update.effective_user.first_name or "Admin"
-    role = "Owner" if user_id == str(config.OWNER_CHAT_ID) else "HR"
+    role = "Owner" if config.is_owner(user_id) else "HR"
     tz = pytz.timezone(config.TIMEZONE)
     now = datetime.now(tz)
 
@@ -628,7 +628,7 @@ async def warning_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             logger.warning(f"Warning DM failed for {emp_id}: {e}")
 
     # Also notify the other admin
-    for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+    for admin_id in config.OWNER_CHAT_IDS + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else []):
         if admin_id and str(admin_id) != user_id:
             try:
                 await context.bot.send_message(

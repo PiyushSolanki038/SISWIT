@@ -24,7 +24,7 @@ async def allow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = str(query.from_user.id)
     admin_name = query.from_user.first_name or "Admin"
 
-    if admin_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+    if not config.is_admin(admin_id):
         await query.edit_message_text("🚫 You are not authorized.")
         return
 
@@ -88,7 +88,7 @@ async def edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = str(query.from_user.id)
     admin_name = query.from_user.first_name or "Admin"
 
-    if admin_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+    if not config.is_admin(admin_id):
         await query.edit_message_text("🚫 You are not authorized.")
         return
 
@@ -155,7 +155,7 @@ async def leave_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     admin_id = str(query.from_user.id)
     admin_name = query.from_user.first_name or "Admin"
 
-    if admin_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+    if not config.is_admin(admin_id):
         await query.edit_message_text("🚫 You are not authorized.")
         return
 

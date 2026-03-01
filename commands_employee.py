@@ -207,11 +207,11 @@ async def edit_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If Owner is requesting, only send to HR
     requester_id = str(requester.id)
     if requester_id == str(config.HR_CHAT_ID):
-        approval_targets = [config.OWNER_CHAT_ID]
-    elif requester_id == str(config.OWNER_CHAT_ID):
+        approval_targets = list(config.OWNER_CHAT_IDS)
+    elif config.is_owner(requester_id):
         approval_targets = [config.HR_CHAT_ID]
     else:
-        approval_targets = [config.OWNER_CHAT_ID, config.HR_CHAT_ID]
+        approval_targets = list(config.OWNER_CHAT_IDS) + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else [])
 
     for admin_id in approval_targets:
         if admin_id:
@@ -314,11 +314,11 @@ async def leave_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     # If Owner is requesting, only send to HR
     requester_id = str(requester.id)
     if requester_id == str(config.HR_CHAT_ID):
-        approval_targets = [config.OWNER_CHAT_ID]
-    elif requester_id == str(config.OWNER_CHAT_ID):
+        approval_targets = list(config.OWNER_CHAT_IDS)
+    elif config.is_owner(requester_id):
         approval_targets = [config.HR_CHAT_ID]
     else:
-        approval_targets = [config.OWNER_CHAT_ID, config.HR_CHAT_ID]
+        approval_targets = list(config.OWNER_CHAT_IDS) + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else [])
 
     for admin_id in approval_targets:
         if admin_id:

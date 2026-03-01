@@ -84,7 +84,7 @@ async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display all commands based on role."""
     user_id = str(update.effective_user.id)
-    is_admin = user_id in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]
+    is_admin = config.is_admin(user_id)
 
     msg = (
         "📖 *Bot Commands*\n━━━━━━━━━━━━━━━━━━━━━━\n\n"
@@ -115,7 +115,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             "• /broadcast `Text` — Send announcement\n"
             "• /deadline `HH:MM` — Set submission deadline\n"
         )
-        if user_id == str(config.OWNER_CHAT_ID):
+        if config.is_owner(user_id):
             msg += "• /sethr `CHAT_ID` — Change HR\n"
 
         msg += (
@@ -132,7 +132,7 @@ async def help_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def staff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Display registered staff list (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+    if not config.is_admin(user_id):
         await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
@@ -151,7 +151,7 @@ async def staff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def addstaff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Add a new staff member (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+    if not config.is_admin(user_id):
         await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
@@ -182,7 +182,7 @@ async def addstaff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 async def removestaff_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Remove a staff member (Owner/HR only)."""
     user_id = str(update.effective_user.id)
-    if user_id not in [str(config.OWNER_CHAT_ID), str(config.HR_CHAT_ID)]:
+    if not config.is_admin(user_id):
         await update.message.reply_text("🚫 *Permission Denied*", parse_mode="Markdown")
         return
 
@@ -298,7 +298,7 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
             f"Repeated requests may indicate misuse or data manipulation._"
         )
 
-        for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+        for admin_id in config.OWNER_CHAT_IDS + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else []):
             if admin_id:
                 try:
                     await context.bot.send_message(
@@ -331,7 +331,7 @@ async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         InlineKeyboardButton("❌ Reject", callback_data=f"allow_reject:{emp_id}:{requester.id}:{chat_id}"),
     ]])
 
-    for admin_id in [config.OWNER_CHAT_ID, config.HR_CHAT_ID]:
+    for admin_id in config.OWNER_CHAT_IDS + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else []):
         if admin_id:
             try:
                 await context.bot.send_message(
@@ -458,7 +458,8 @@ async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     notification_data = data.copy()
     if is_resubmission:
         notification_data["work_update"] = f"[RE-SUBMIT] {work_update}"
-    await send_personal_notification(context.bot, config.OWNER_CHAT_ID, notification_data, "Owner")
+    for owner_id in config.OWNER_CHAT_IDS:
+        await send_personal_notification(context.bot, owner_id, notification_data, "Owner")
     await send_personal_notification(context.bot, config.HR_CHAT_ID, notification_data, "HR")
 
     # Record with metadata
