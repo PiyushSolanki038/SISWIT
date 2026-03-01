@@ -29,17 +29,9 @@ def _get_month_sheet_name(date_obj=None):
     return date_obj.strftime("%b %Y")
 
 
-def _is_on_time(time_str):
-    """Check if submission time is before the deadline."""
-    try:
-        deadline = config.get_deadline()
-        deadline_h, deadline_m = map(int, deadline.split(":"))
-        # Parse time like "09:30 AM"
-        sub_time = datetime.strptime(time_str, "%I:%M %p")
-        deadline_time = sub_time.replace(hour=deadline_h, minute=deadline_m)
-        return sub_time <= deadline_time
-    except Exception:
-        return True  # Default to on-time if parsing fails
+def _is_on_time(data):
+    """Check if submission is on time — uses the on_time field from bot.py."""
+    return data.get("on_time", "Yes") == "Yes"
 
 
 def save_to_excel(data: dict) -> bool:
@@ -50,7 +42,7 @@ def save_to_excel(data: dict) -> bool:
 
         file_path = config.EXCEL_FILE
         month_name = _get_month_sheet_name()
-        on_time = _is_on_time(data["time"])
+        on_time = _is_on_time(data)
 
         if os.path.exists(file_path):
             wb = load_workbook(file_path)
@@ -366,7 +358,7 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
         spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
 
         month_name = _get_month_sheet_name()
-        on_time = _is_on_time(data["time"])
+        on_time = _is_on_time(data)
 
         # Get or create monthly worksheet
         try:
