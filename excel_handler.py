@@ -315,9 +315,10 @@ def save_leave_to_excel(emp_id, emp_name, dept, leave_date, reason, approved_by,
             ws.freeze_panes = "A2"
             next_row = 2
 
-        # Calculate deduction
-        is_extra = leave_count > 3
-        deduction = f"-₹{(leave_count - 3) * 500}" if is_extra else "—"
+        # Calculate deduction (₹500 for each leave starting from the 4th)
+        is_extra = int(leave_count) > 3
+        deduction_amt = (int(leave_count) - 3) * 500 if is_extra else 0
+        deduction = f"-₹{deduction_amt}" if is_extra else "—"
         status = "⚠️ Extra Leave" if is_extra else "✅ Approved"
 
         sr = next_row - 1
@@ -374,6 +375,11 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
         # Get or create monthly worksheet
         try:
             sheet = spreadsheet.worksheet(month_name)
+            # REPAIR HEADERS if they differ (e.g. from Check-in Time to Submit Time)
+            first_row = sheet.row_values(1)
+            if first_row[:len(HEADERS)] != HEADERS:
+                logger.info(f"Repairing headers in sheet '{month_name}'")
+                sheet.update("A1", [HEADERS]) # Use sheet.update for the whole range
         except gspread.exceptions.WorksheetNotFound:
             sheet = spreadsheet.add_worksheet(title=month_name, rows=1000, cols=12)
             sheet.append_row(HEADERS)
@@ -789,9 +795,10 @@ def _save_leave_to_google_sheets_sync(emp_id, emp_name, dept, leave_date, reason
             })
             sheet.freeze(rows=1)
 
-        # Calculate deduction
-        is_extra = leave_count > 3
-        deduction = f"-₹{(leave_count - 3) * 500}" if is_extra else "—"
+        # Calculate deduction (₹500 for each leave starting from the 4th)
+        is_extra = int(leave_count) > 3
+        deduction_amt = (int(leave_count) - 3) * 500 if is_extra else 0
+        deduction = f"-₹{deduction_amt}" if is_extra else "—"
         status = "⚠️ Extra Leave" if is_extra else "✅ Approved"
 
         existing = sheet.get_all_values()
