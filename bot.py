@@ -59,6 +59,9 @@ async def send_personal_notification(bot, chat_id: str, data: dict, label: str):
         logger.warning(f"Failed to notify {label}: {e}")
 
 
+# Logic moved to config.py
+
+
 # ─── Basic Commands ─────────────────────────────────────────────────────────
 async def start_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Welcome message."""
@@ -250,225 +253,257 @@ async def report_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def allow_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Request re-submission (sends approval to Owner & HR). Max 1 per day."""
-    if not context.args:
-        await update.message.reply_text("❗ *Usage:* `/allow EMP_ID`", parse_mode="Markdown")
-        return
+    try:
+        if not context.args:
+            await update.message.reply_text("❗ *Usage:* `/allow EMP_ID`", parse_mode="Markdown")
+            return
 
-    emp_id = context.args[0].upper()
-    requester = update.effective_user
-    requester_name = requester.first_name or "Unknown"
+        emp_id = context.args[0].upper()
+        requester = update.effective_user
+        requester_name = requester.first_name or "Unknown"
 
-    if emp_id not in config.STAFF_RECORDS:
-        await update.message.reply_text(f"❌ `{emp_id}` is not registered.", parse_mode="Markdown")
-        return
+        logger.info(f"ALLOW: Request for {emp_id} by {requester_name} (ID: {requester.id})")
 
-    tz = pytz.timezone(config.TIMEZONE)
-    now = datetime.now(tz)
-    today_str = now.strftime("%Y-%m-%d")
+        # ─── Permission Check: Only Owner or HR ──────────────────────────────
+        if not config.is_admin(requester.id):
+            await update.message.reply_text("🚫 *Access Denied:* You do not have permission to use this command.", parse_mode="Markdown")
+            logger.warning(f"UNAUTHORIZED /allow: {requester_name} (ID: {requester.id}) tried to allow {emp_id}")
+            return
 
-    if "daily_log" not in context.bot_data:
-        context.bot_data["daily_log"] = config.load_daily_log()
+        if emp_id not in config.STAFF_RECORDS:
+            await update.message.reply_text(f"❌ `{emp_id}` is not registered.", parse_mode="Markdown")
+            return
 
-    today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
-    if emp_id not in today_log:
-        await update.message.reply_text(f"ℹ️ `{emp_id}` has not submitted today — no need to allow.", parse_mode="Markdown")
-        return
+        record_date, now, _ = config.get_attendance_date()
+        today_str = record_date.strftime("%Y-%m-%d")
 
-    staff_name = config.STAFF_RECORDS[emp_id]["name"]
-    group_name = update.message.chat.title or "Private Chat"
-    chat_id = str(update.message.chat.id)
+        if "daily_log" not in context.bot_data:
+            context.bot_data["daily_log"] = config.load_daily_log()
 
-    # ─── Allow Limit: max 1 per day per employee ─────────────────────────
-    if "allow_usage" not in context.bot_data:
-        context.bot_data["allow_usage"] = {}
-    if today_str not in context.bot_data["allow_usage"]:
-        context.bot_data["allow_usage"][today_str] = {}
+        today_log = context.bot_data.get("daily_log", {}).get(today_str, {})
+        if emp_id not in today_log:
+            await update.message.reply_text(
+                f"ℹ️ `{emp_id}` has not submitted for {record_date.strftime('%d %b')} — no need to allow.",
+                parse_mode="Markdown"
+            )
+            return
 
-    usage_count = context.bot_data["allow_usage"][today_str].get(emp_id, 0)
+        staff_name = config.STAFF_RECORDS[emp_id]["name"]
+        group_name = update.message.chat.title or "Private Chat"
+        chat_id = str(update.message.chat.id)
 
-    if usage_count >= 1:
-        # 2nd+ attempt — send suspicious activity alert to Owner & HR
-        alert_msg = (
-            f"🚨 *SUSPICIOUS ACTIVITY ALERT*\n━━━━━━━━━━━━━━━━━━━━━━\n"
-            f"⚠️ *Employee:* {staff_name} (`{emp_id}`)\n"
+        # ─── Allow Limit: max 1 per day per employee ─────────────────────────
+        if "allow_usage" not in context.bot_data:
+            context.bot_data["allow_usage"] = {}
+        if today_str not in context.bot_data["allow_usage"]:
+            context.bot_data["allow_usage"][today_str] = {}
+
+        usage_count = context.bot_data["allow_usage"][today_str].get(emp_id, 0)
+
+        if usage_count >= 1:
+            # 2nd+ attempt — send suspicious activity alert to Owner & HR
+            alert_msg = (
+                f"🚨 *SUSPICIOUS ACTIVITY ALERT*\n━━━━━━━━━━━━━━━━━━━━━━\n"
+                f"⚠️ *Employee:* {staff_name} (`{emp_id}`)\n"
+                f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
+                f"🔁 *Allow Attempts:* {usage_count + 1} (exceeded limit!)\n"
+                f"👤 *Requested By:* {requester_name}\n\n"
+                f"_This employee has already used their 1 allowed re-submission today. "
+                f"Repeated requests may indicate misuse or data manipulation._"
+            )
+
+            for admin_id in config.OWNER_CHAT_IDS + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else []):
+                if admin_id:
+                    try:
+                        await context.bot.send_message(
+                            chat_id=int(admin_id), text=alert_msg, parse_mode="Markdown",
+                        )
+                    except Exception as e:
+                        logger.warning(f"Failed to send alert to {admin_id}: {e}")
+
+            await update.message.reply_text(
+                f"🚫 *Request Denied*\n\n`{emp_id}` has already used their 1 re-submission for today. "
+                f"Owner & HR have been notified.",
+                parse_mode="Markdown",
+            )
+            logger.warning(f"SUSPICIOUS: {emp_id} attempted /allow #{usage_count + 1} on {today_str}")
+            return
+
+        # Track usage (increment AFTER approval is sent)
+        context.bot_data["allow_usage"][today_str][emp_id] = usage_count + 1
+
+        approval_msg = (
+            f"🔔 *Re-submission Request*\n━━━━━━━━━━━━━━━━━━━━━━\n"
+            f"👤 *By:* {requester_name}\n"
+            f"🆔 *Employee:* {staff_name} (`{emp_id}`)\n"
             f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
-            f"🔁 *Allow Attempts:* {usage_count + 1} (exceeded limit!)\n"
-            f"👤 *Requested By:* {requester_name}\n\n"
-            f"_This employee has already used their 1 allowed re-submission today. "
-            f"Repeated requests may indicate misuse or data manipulation._"
+            f"📍 *Group:* {group_name}\n\nApprove re-submission?"
         )
+
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("✅ Approve", callback_data=f"allow_approve:{emp_id}:{requester.id}:{chat_id}"),
+            InlineKeyboardButton("❌ Reject", callback_data=f"allow_reject:{emp_id}:{requester.id}:{chat_id}"),
+        ]])
 
         for admin_id in config.OWNER_CHAT_IDS + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else []):
             if admin_id:
                 try:
                     await context.bot.send_message(
-                        chat_id=int(admin_id), text=alert_msg, parse_mode="Markdown",
+                        chat_id=int(admin_id), text=approval_msg,
+                        parse_mode="Markdown", reply_markup=keyboard,
                     )
                 except Exception as e:
-                    logger.warning(f"Failed to send alert to {admin_id}: {e}")
+                    logger.warning(f"Failed to send to {admin_id}: {e}")
 
-        await update.message.reply_text(
-            f"🚫 *Request Denied*\n\n`{emp_id}` has already used their 1 re-submission for today. "
-            f"Owner & HR have been notified.",
-            parse_mode="Markdown",
-        )
-        logger.warning(f"SUSPICIOUS: {emp_id} attempted /allow #{usage_count + 1} on {today_str}")
-        return
+        await update.message.reply_text(f"📨 Request sent to Owner & HR for `{emp_id}`.", parse_mode="Markdown")
+        logger.info(f"Allow request for {emp_id} by {requester_name}")
 
-    # Track usage (increment AFTER approval is sent)
-    context.bot_data["allow_usage"][today_str][emp_id] = usage_count + 1
 
-    approval_msg = (
-        f"🔔 *Re-submission Request*\n━━━━━━━━━━━━━━━━━━━━━━\n"
-        f"👤 *By:* {requester_name}\n"
-        f"🆔 *Employee:* {staff_name} (`{emp_id}`)\n"
-        f"📅 *Date:* {now.strftime('%d %b %Y')}\n"
-        f"📍 *Group:* {group_name}\n\nApprove re-submission?"
-    )
-
-    keyboard = InlineKeyboardMarkup([[
-        InlineKeyboardButton("✅ Approve", callback_data=f"allow_approve:{emp_id}:{requester.id}:{chat_id}"),
-        InlineKeyboardButton("❌ Reject", callback_data=f"allow_reject:{emp_id}:{requester.id}:{chat_id}"),
-    ]])
-
-    for admin_id in config.OWNER_CHAT_IDS + ([config.HR_CHAT_ID] if config.HR_CHAT_ID else []):
-        if admin_id:
-            try:
-                await context.bot.send_message(
-                    chat_id=int(admin_id), text=approval_msg,
-                    parse_mode="Markdown", reply_markup=keyboard,
-                )
-            except Exception as e:
-                logger.warning(f"Failed to send to {admin_id}: {e}")
-
-    await update.message.reply_text(f"📨 Request sent to Owner & HR for `{emp_id}`.", parse_mode="Markdown")
-    logger.info(f"Allow request for {emp_id} by {requester_name}")
+    except Exception as e:
+        logger.error(f"CRITICAL ERROR in allow_command: {e}", exc_info=True)
+        await update.message.reply_text(f"⚠️ *Internal Error:* `{e}`\n_Please check bot logs._", parse_mode="Markdown")
 
 
 # ─── Main Message Handler ────────────────────────────────────────────────────
 async def handle_message(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Process incoming messages and parse work updates."""
-    if not update.message or not update.message.text:
-        return
+    try:
+        if not update.message or not update.message.text:
+            return
 
-    text = update.message.text.strip()
+        text = update.message.text.strip()
 
-    # Simple parse: first word = EMP_ID, rest = work
-    parts = text.split(None, 1)
-    if len(parts) < 2:
-        return
+        # Simple parse: first word = EMP_ID, rest = work
+        parts = text.split(None, 1)
+        if len(parts) < 2:
+            return
 
-    emp_id = parts[0].upper()
-    work_update = parts[1].strip()
+        emp_id = parts[0].upper()
+        work_update = parts[1].strip()
 
-    # Only process registered IDs
-    staff_info = config.STAFF_RECORDS.get(emp_id)
-    if not staff_info:
-        return
+        # Only process registered IDs
+        staff_info = config.STAFF_RECORDS.get(emp_id)
+        if not staff_info:
+            return
 
-    emp_name = staff_info["name"]
-    department = staff_info["dept"]
+        emp_name = staff_info["name"]
+        department = staff_info["dept"]
 
-    # Auto-detect and store group chat ID
-    if update.message.chat.type in ["group", "supergroup"]:
-        config.GROUP_CHAT_ID = str(update.message.chat.id)
+        # Auto-detect and store group chat ID
+        if update.message.chat.type in ["group", "supergroup"]:
+            config.GROUP_CHAT_ID = str(update.message.chat.id)
 
-    # Store employee's Telegram ID for /dm and /warning
-    user = update.message.from_user
-    if user and not staff_info.get("telegram_id"):
-        config.STAFF_RECORDS[emp_id]["telegram_id"] = str(user.id)
-        config.save_staff_records(config.STAFF_RECORDS)
+        # Store employee's Telegram ID for /dm and /warning
+        user = update.message.from_user
+        if user and not staff_info.get("telegram_id"):
+            config.STAFF_RECORDS[emp_id]["telegram_id"] = str(user.id)
+            config.save_staff_records(config.STAFF_RECORDS)
 
-    tz = pytz.timezone(config.TIMEZONE)
-    now = datetime.now(tz)
+        user = update.message.from_user
+        username = user.username if user.username else user.first_name or "Unknown"
+        group_name = update.message.chat.title or ("Private Chat" if update.message.chat.type == "private" else "")
 
-    user = update.message.from_user
-    username = user.username if user.username else user.first_name or "Unknown"
-    group_name = update.message.chat.title or ("Private Chat" if update.message.chat.type == "private" else "")
-
-    # ─── Attendance Day Logic ───────────────────────────────────────────────
-    # Before 1:00 PM → attendance counts for PREVIOUS day (On Time)
-    # After  1:00 PM → attendance counts for CURRENT day (new day starts)
-    CUTOFF_HOUR = 13  # 1:00 PM
-
-    if now.hour < CUTOFF_HOUR:
-        # Before 1 PM — this is yesterday's attendance, On Time
-        record_date = now - timedelta(days=1)
+        record_date, now, is_new_day = config.get_attendance_date()
+        
+        # ─── Late Check ──────────────────────────────────────────────────────────
+        # Check deadline from config (e.g. "11:00")
+        deadline = config.get_deadline()
         is_late = False
-        grace_note = f"📅 _Recorded for {record_date.strftime('%d %b %Y')} (On Time)_"
-    else:
-        # After 1 PM — new day's attendance starts
-        record_date = now
-        is_late = False
+        try:
+            dh, dm = map(int, deadline.split(":"))
+            if now.hour > dh or (now.hour == dh and now.minute > dm):
+                is_late = True
+        except Exception:
+            pass
+
         grace_note = ""
+        if not is_new_day:
+            grace_note = f"📅 _Recorded for {record_date.strftime('%d %b %Y')} (On Time)_"
 
-    data = {
-        "emp_id": emp_id, "department": department, "emp_name": emp_name,
-        "username": username, "date": record_date.strftime("%d-%m-%Y"),
-        "day": record_date.strftime("%A"), "time": now.strftime("%I:%M %p"),
-        "work_update": work_update, "group_name": group_name,
-        "on_time": "Yes",
-    }
+        data = {
+            "emp_id": emp_id, "department": department, "emp_name": emp_name,
+            "username": username, "date": record_date.strftime("%d-%m-%Y"),
+            "day": record_date.strftime("%A"), "time": now.strftime("%I:%M %p"),
+            "work_update": work_update, "group_name": group_name,
+            "on_time": "No" if is_late else "Yes",
+        }
 
-    logger.info(f"Update: {emp_id} | {department} | {emp_name}")
+        logger.info(f"Update: {emp_id} | {department} | {emp_name}")
 
-    # Check daily log
-    if "daily_log" not in context.bot_data:
-        context.bot_data["daily_log"] = config.load_daily_log()
+        # Check daily log
+        if "daily_log" not in context.bot_data:
+            context.bot_data["daily_log"] = config.load_daily_log()
 
-    log_date_str = record_date.strftime("%Y-%m-%d")
-    if log_date_str not in context.bot_data["daily_log"]:
-        context.bot_data["daily_log"][log_date_str] = {}
+        log_date_str = record_date.strftime("%Y-%m-%d")
+        if log_date_str not in context.bot_data["daily_log"]:
+            context.bot_data["daily_log"][log_date_str] = {}
 
-    # Check if this is a re-submission (/allow was used)
-    is_resubmission = False
-    if emp_id in context.bot_data["daily_log"][log_date_str]:
-        # Check if re-submission was approved (daily_log cleared by allow_callback)
-        await update.message.reply_text(
-            f"❌ *Already Submitted*\n{emp_name} (`{emp_id}`) already submitted for {record_date.strftime('%d %b')}. Use `/allow {emp_id}` to request re-submission.",
-            parse_mode="Markdown",
-        )
-        return
+        if emp_id in context.bot_data["daily_log"][log_date_str]:
+            await update.message.reply_text(
+                f"❌ *Already Submitted*\n{emp_name} (`{emp_id}`) already submitted for {record_date.strftime('%d %b')}. Use `/allow {emp_id}` to request re-submission.",
+                parse_mode="Markdown",
+            )
+            return
 
-    # Check if employee had a previous submission today that was cleared by /allow
-    allow_usage = context.bot_data.get("allow_usage", {}).get(log_date_str, {})
-    if emp_id in allow_usage and allow_usage[emp_id] > 0:
-        is_resubmission = True
+        # ─── ATOMIC LOG UPDATE (Before await) ────────────────────────────────────
+        # Record immediately to prevent race conditions if multiple messages arrive
+        is_resubmission = False
+        allow_usage = context.bot_data.get("allow_usage", {}).get(log_date_str, {})
+        if emp_id in allow_usage and allow_usage[emp_id] > 0:
+            is_resubmission = True
 
-    # Save to Excel & Google Sheets
-    save_to_excel(data)
-    if is_resubmission:
-        # UPDATE existing row instead of creating a new one
-        await update_row_in_google_sheets(data)
-    else:
-        await save_to_google_sheets(data)
+        data["is_resubmission"] = is_resubmission
 
-    if config.IS_RAILWAY:
-        logger.warning("Excel on Railway is ephemeral.")
+        context.bot_data["daily_log"][log_date_str][emp_id] = {
+            "time": now.strftime("%I:%M %p"), "work": work_update, "late": is_late,
+            "username": username, "group": group_name, "is_resubmission": is_resubmission
+        }
 
-    # Confirmation
-    confirm_msg = f"Thank you, *{emp_name}*! ✅"
-    if is_resubmission:
-        confirm_msg += "\n📝 _Your previous entry has been updated._"
-    if grace_note:
-        confirm_msg += f"\n{grace_note}"
-    await update.message.reply_text(confirm_msg, parse_mode="Markdown")
+        # Save to Excel & Google Sheets
+        save_to_excel(data)
+        
+        sheets_success = False
+        if is_resubmission:
+            # UPDATE existing row instead of creating a new one
+            sheets_success = await update_row_in_google_sheets(data)
+        else:
+            sheets_success = await save_to_google_sheets(data)
 
-    # Notifications
-    notification_data = data.copy()
-    if is_resubmission:
-        notification_data["work_update"] = f"[RE-SUBMIT] {work_update}"
-    for owner_id in config.OWNER_CHAT_IDS:
-        await send_personal_notification(context.bot, owner_id, notification_data, "Owner")
-    await send_personal_notification(context.bot, config.HR_CHAT_ID, notification_data, "HR")
+        if not sheets_success:
+            logger.warning(f"Google Sheets update failed for {emp_id}")
+            # We don't block the user but we notify in logs
 
-    # Record with metadata
-    context.bot_data["daily_log"][log_date_str][emp_id] = {
-        "time": data["time"], "work": work_update, "late": is_late,
-    }
-    config.save_daily_log(context.bot_data["daily_log"])
+        if config.IS_RAILWAY:
+            logger.warning("Excel on Railway is ephemeral.")
 
-    logger.info("Update complete")
+        # Confirmation
+        confirm_msg = f"Thank you, *{emp_name}*! ✅"
+        if is_resubmission:
+            confirm_msg += "\n📝 _Your previous entry has been updated._"
+        
+        if not sheets_success and config.GOOGLE_SHEET_ID:
+             confirm_msg += "\n⚠️ _Note: Google Sheets sync failed, but Excel is saved._"
+             
+        if grace_note:
+            confirm_msg += f"\n{grace_note}"
+        await update.message.reply_text(confirm_msg, parse_mode="Markdown")
+
+        # Notifications
+        notification_data = data.copy()
+        if is_resubmission:
+            notification_data["work_update"] = f"[RE-SUBMIT] {work_update}"
+        for owner_id in config.OWNER_CHAT_IDS:
+            await send_personal_notification(context.bot, owner_id, notification_data, "Owner")
+        await send_personal_notification(context.bot, config.HR_CHAT_ID, notification_data, "HR")
+
+        config.save_daily_log(context.bot_data["daily_log"])
+
+    except Exception as e:
+        logger.error(f"CRITICAL ERROR in handle_message: {e}", exc_info=True)
+        try:
+            await update.message.reply_text(f"⚠️ *Critical Error:* `{e}`", parse_mode="Markdown")
+        except:
+            pass
 
 
 # ─── Bot Startup ─────────────────────────────────────────────────────────────

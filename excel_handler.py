@@ -11,6 +11,8 @@ from datetime import datetime
 import config
 
 logger = logging.getLogger(__name__)
+SHEET_LOCK = asyncio.Lock()
+
 
 # ─── Excel Constants ─────────────────────────────────────────────────────────
 HEADERS = [
@@ -375,38 +377,55 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
             sheet.freeze(rows=1)
 
         existing = sheet.get_all_values()
-        sr_no = len(existing) if existing else 1
+        
+        # Calculate sr_no robustly - find the last numeric Sr No
+        sr_no = 1
+        if len(existing) > 1:
+            for i in range(len(existing) - 1, 0, -1):
+                last_sr = existing[i][0]
+                if str(last_sr).strip().isdigit():
+                    sr_no = int(last_sr) + 1
+                    break
 
+        new_rows = []
         # Check if new day → insert separator row
         if len(existing) > 1:
-            last_date = existing[-1][5] if len(existing[-1]) > 5 else ""  # Date column (index 5)
-            current_date = data["date"]
-            if last_date and last_date != current_date and last_date != "Date":
-                # Insert a day-separator row
-                sep_text = f"📅 {current_date} — {data['day']}"
-                sep_row = [sep_text, "", "", "", "", "", "", "", "", "", "", ""]
-                sheet.append_row(sep_row)
-                # Format separator row (skip merge to avoid API errors)
-                try:
-                    sep_row_num = len(sheet.get_all_values())
-                    sheet.format(f"A{sep_row_num}:L{sep_row_num}", {
-                        "backgroundColor": {"red": 0.839, "green": 0.894, "blue": 0.941},
-                        "textFormat": {"bold": True, "fontSize": 10,
-                                      "foregroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361}},
-                        "horizontalAlignment": "CENTER",
-                    })
-                except Exception as fmt_e:
-                    logger.warning(f"Separator formatting failed (non-critical): {fmt_e}")
-                sr_no += 1
+            last_date = ""
+            # Look for the last non-empty date in column F (index 5)
+            for i in range(len(existing) - 1, 0, -1):
+                if len(existing[i]) > 5 and existing[i][5]:
+                    last_date = existing[i][5]
+                    break
+            
+            if last_date and last_date != data["date"]:
+                separator = [""] * 12
+                separator[5] = f"─── {data['date']} ───"
+                new_rows.append(separator)
 
+        # Prepare main data row
+        on_time = (data.get("on_time") == "Yes")
         row = [
             sr_no, data["emp_id"], data["department"], data["emp_name"],
             data["username"], data["date"], data["day"], data["time"],
-            data["work_update"], data["group_name"],
-            "✅ Present", "✅ Yes" if on_time else "❌ Late",
+            data["work_update"], data["group_name"], "✅ Present", "✅ Yes" if on_time else "❌ Late"
         ]
+        new_rows.append(row)
 
-        sheet.append_row(row)
+        # ATOMIC APPEND to prevent race conditions splitting separator and data
+        sheet.append_rows(new_rows, value_input_option="USER_ENTERED")
+        
+        # If we added a separator, format it
+        if len(new_rows) > 1:
+            try:
+                last_idx = len(existing) + 1
+                sheet.format(f"A{last_idx}:L{last_idx}", {
+                    "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95},
+                    "textFormat": {"bold": True, "italic": True, "foregroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}},
+                    "horizontalAlignment": "CENTER",
+                })
+            except Exception as fmt_e:
+                logger.warning(f"Separator formatting failed: {fmt_e}")
+
         logger.info(f"Google Sheets: Saved update #{sr_no} to {month_name}")
 
         # Also update Attendance_Log if it exists (backward compatibility)
@@ -620,12 +639,13 @@ def _update_google_sheets_summaries(spreadsheet, month_name):
 
 
 async def save_to_google_sheets(data: dict) -> bool:
-    """Save to Google Sheets in a background thread (non-blocking)."""
-    try:
-        return await asyncio.to_thread(_save_to_google_sheets_sync, data)
-    except Exception as e:
-        logger.error(f"Google Sheets async wrapper failed: {e}", exc_info=True)
-        return False
+    """Save to Google Sheets in a background thread with locking."""
+    async with SHEET_LOCK:
+        try:
+            return await asyncio.to_thread(_save_to_google_sheets_sync, data)
+        except Exception as e:
+            logger.error(f"Google Sheets async wrapper failed: {e}", exc_info=True)
+            return False
 
 
 def _update_row_in_google_sheets_sync(data: dict) -> bool:
@@ -647,7 +667,7 @@ def _update_row_in_google_sheets_sync(data: dict) -> bool:
         spreadsheet = client.open_by_key(config.GOOGLE_SHEET_ID)
 
         month_name = _get_month_sheet_name()
-        on_time = _is_on_time(data["time"])
+        on_time = _is_on_time(data)
         emp_id = data["emp_id"]
         target_date = data["date"]
 
@@ -700,12 +720,13 @@ def _update_row_in_google_sheets_sync(data: dict) -> bool:
 
 
 async def update_row_in_google_sheets(data: dict) -> bool:
-    """Update existing row in Google Sheets (non-blocking)."""
-    try:
-        return await asyncio.to_thread(_update_row_in_google_sheets_sync, data)
-    except Exception as e:
-        logger.error(f"Google Sheets update async failed: {e}", exc_info=True)
-        return False
+    """Update existing row in Google Sheets with locking."""
+    async with SHEET_LOCK:
+        try:
+            return await asyncio.to_thread(_update_row_in_google_sheets_sync, data)
+        except Exception as e:
+            logger.error(f"Google Sheets update async failed: {e}", exc_info=True)
+            return False
 
 
 def _save_leave_to_google_sheets_sync(emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count):
@@ -792,15 +813,16 @@ def _save_leave_to_google_sheets_sync(emp_id, emp_name, dept, leave_date, reason
 
 
 async def save_leave_to_google_sheets(emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count):
-    """Save leave to Google Sheets in a background thread (non-blocking)."""
-    try:
-        return await asyncio.to_thread(
-            _save_leave_to_google_sheets_sync,
-            emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count
-        )
-    except Exception as e:
-        logger.error(f"Google Sheets leave async failed: {e}", exc_info=True)
-        return False
+    """Save leave to Google Sheets in a background thread with locking."""
+    async with SHEET_LOCK:
+        try:
+            return await asyncio.to_thread(
+                _save_leave_to_google_sheets_sync,
+                emp_id, emp_name, dept, leave_date, reason, approved_by, leave_count
+            )
+        except Exception as e:
+            logger.error(f"Google Sheets leave async failed: {e}", exc_info=True)
+            return False
 
 
 # ─── Read Attendance from Google Sheets ──────────────────────────────────────

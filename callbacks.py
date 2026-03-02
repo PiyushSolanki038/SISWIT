@@ -11,7 +11,7 @@ from telegram import Update
 from telegram.ext import ContextTypes
 
 import config
-from excel_handler import save_leave_to_excel, save_leave_to_google_sheets, count_monthly_leaves
+from excel_handler import save_leave_to_excel, save_leave_to_google_sheets, count_monthly_leaves, update_row_in_google_sheets, save_to_excel
 
 logger = logging.getLogger(__name__)
 
@@ -37,8 +37,8 @@ async def allow_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     staff_name = config.STAFF_RECORDS.get(emp_id, {}).get("name", emp_id)
 
     if action == "allow_approve":
-        now = datetime.now(pytz.timezone(config.TIMEZONE))
-        today_str = now.strftime("%Y-%m-%d")
+        record_date, now, _ = config.get_attendance_date()
+        today_str = record_date.strftime("%Y-%m-%d")
 
         if "daily_log" not in context.bot_data:
             context.bot_data["daily_log"] = config.load_daily_log()
@@ -123,6 +123,20 @@ async def edit_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
         # Clean up pending
         if emp_id in context.bot_data.get("pending_edits", {}):
+            # Update Sheets
+            data = {
+                "emp_id": emp_id,
+                "emp_name": staff_name,
+                "department": config.STAFF_RECORDS.get(emp_id, {}).get("dept", "N/A"),
+                "username": "N/A",  # We don't have it here easily
+                "date": pending.get("date", "N/A"),
+                "day": "N/A",
+                "time": "N/A",
+                "work_update": new_text,
+                "group_name": "N/A",
+            }
+            save_to_excel(data)
+            await update_row_in_google_sheets(data)
             del context.bot_data["pending_edits"][emp_id]
 
         logger.info(f"Edit approved for {emp_id} by {admin_name}")

@@ -13,7 +13,9 @@ try:
     from dotenv import load_dotenv
     load_dotenv()
 except ImportError:
-    pass  # python-dotenv not installed, skip silently
+    pass
+import pytz
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -218,3 +220,22 @@ def save_leave_log(log_data):
 def get_deadline():
     """Get the current submission deadline (dynamic or default)."""
     return get_setting("deadline", SUBMISSION_DEADLINE)
+
+
+def get_attendance_date():
+    """Get the current attendance date based on 1:00 PM cutoff.
+    Before 1 PM -> yesterday
+    After 1 PM -> today
+    """
+    tz = pytz.timezone(TIMEZONE)
+    now = datetime.now(tz)
+    CUTOFF_HOUR = 13  # 1:00 PM
+
+    if now.hour < CUTOFF_HOUR:
+        record_date = now - timedelta(days=1)
+        is_new_day = False
+    else:
+        record_date = now
+        is_new_day = True
+
+    return record_date, now, is_new_day
