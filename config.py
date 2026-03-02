@@ -45,7 +45,7 @@ def is_admin(user_id):
 EXCEL_FILE = os.getenv("EXCEL_FILE", "employee_updates.xlsx")
 
 # ─── Google Sheets Configuration ─────────────────────────────────────────────
-GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "")
+GOOGLE_SHEET_ID = os.getenv("GOOGLE_SHEET_ID", "1GwQLgeGA-ymsiYRrbuxyKDtnE-CLu3NDUvsSAsXxA9A")
 GOOGLE_CREDS_FILE = os.getenv("GOOGLE_CREDS_FILE", "credentials.json")
 
 # ─── Railway Deployment Support ──────────────────────────────────────────────
