@@ -17,7 +17,8 @@ SHEET_LOCK = asyncio.Lock()
 # ─── Excel Constants ─────────────────────────────────────────────────────────
 HEADERS = [
     "S.No.", "Date", "Day", "Employee Name", "Emp ID", "Department",
-    "Punctuality", "Work Report", "Source", "Telegram User", "Revision"
+    "Submit Time", "Punctuality", "Work Report", "Source",
+    "Telegram User", "Revision"
 ]
 
 
@@ -89,11 +90,12 @@ def save_to_excel(data: dict) -> bool:
             data["emp_name"],               # 4. Employee Name
             data["emp_id"],                 # 5. Emp ID
             data["department"],             # 6. Department
-            "✅ ON TIME" if on_time else "❌ LATE", # 7. Punctuality
-            data["work_update"],            # 8. Work Report
-            data["group_name"],             # 9. Source
-            data["username"],               # 10. Telegram User
-            "📝 Edited" if is_revision else "Original" # 11. Revision
+            data["time"],                   # 7. Submit Time
+            "✅ ON TIME" if on_time else "❌ LATE", # 8. Punctuality
+            data["work_update"],            # 9. Work Report
+            data["group_name"],             # 10. Source
+            data["username"],               # 11. Telegram User
+            "📝 Edited" if is_revision else "Original" # 12. Revision
         ]
 
         # Styling
@@ -119,13 +121,13 @@ def save_to_excel(data: dict) -> bool:
             cell.border = thin_border
 
         # Center-align specific columns
-        for col in [1, 7, 10, 11]:
+        for col in [1, 7, 8, 11, 12]:
             ws.cell(row=next_row, column=col).alignment = Alignment(
                 horizontal="center", vertical="center"
             )
 
-        # Color the Punctuality cell (now column 7)
-        punct_cell = ws.cell(row=next_row, column=7)
+        # Color the Punctuality cell (now column 8)
+        punct_cell = ws.cell(row=next_row, column=8)
         if on_time:
             punct_cell.font = Font(name="Arial", size=10, color="228B22")
         else:
@@ -164,13 +166,13 @@ def _format_header(ws):
         cell.alignment = header_alignment
         cell.border = thin_border
 
-    col_widths = [8, 15, 15, 20, 20, 14, 12, 50, 25, 12, 12]
+    col_widths = [8, 15, 15, 20, 20, 14, 12, 12, 50, 25, 12, 12]
     for i, width in enumerate(col_widths, 1):
         col_letter = chr(64 + i) if i <= 26 else chr(64 + (i - 1) // 26) + chr(64 + (i - 1) % 26 + 1)
         ws.column_dimensions[col_letter].width = width
 
     ws.freeze_panes = "A2"
-    ws.auto_filter.ref = f"A1:K1"
+    ws.auto_filter.ref = f"A1:L1"
 
 
 def _update_dashboard(wb):
@@ -202,16 +204,16 @@ def _update_dashboard(wb):
             continue
         sheet = wb[sheet_name]
         for row in range(2, sheet.max_row + 1):
-            emp_id = sheet.cell(row=row, column=2).value
+            emp_id = sheet.cell(row=row, column=5).value
             if not emp_id:
                 continue
             if emp_id not in emp_stats:
                 emp_stats[emp_id] = {"days": 0, "late": 0, "leave": 0}
             emp_stats[emp_id]["days"] += 1
-            on_time_val = sheet.cell(row=row, column=7).value
+            on_time_val = sheet.cell(row=row, column=8).value
             if on_time_val and "Late" in str(on_time_val):
                 emp_stats[emp_id]["late"] += 1
-            status_val = sheet.cell(row=row, column=11).value # Source/Status handling
+            status_val = sheet.cell(row=row, column=10).value # Source column
             if status_val and "Leave" in str(status_val):
                 emp_stats[emp_id]["leave"] += 1
 
@@ -373,10 +375,10 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
         try:
             sheet = spreadsheet.worksheet(month_name)
         except gspread.exceptions.WorksheetNotFound:
-            sheet = spreadsheet.add_worksheet(title=month_name, rows=1000, cols=11)
+            sheet = spreadsheet.add_worksheet(title=month_name, rows=1000, cols=12)
             sheet.append_row(HEADERS)
             # Format header
-            sheet.format("A1:K1", {
+            sheet.format("A1:L1", {
                 "backgroundColor": {"red": 0.106, "green": 0.227, "blue": 0.361},
                 "textFormat": {"foregroundColor": {"red": 1, "green": 1, "blue": 1}, "bold": True, "fontSize": 11},
                 "horizontalAlignment": "CENTER",
@@ -405,7 +407,7 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
                     break
             
             if last_date and last_date != data["date"]:
-                separator = [""] * 11
+                separator = [""] * 12
                 separator[1] = f"─── {data['date']} ───"
                 new_rows.append(separator)
 
@@ -418,11 +420,12 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
             data["emp_name"],               # 4. Employee Name
             data["emp_id"],                 # 5. Emp ID
             data["department"],             # 6. Department
-            "✅ ON TIME" if (data.get("on_time") == "Yes") else "❌ LATE", # 7. Punctuality
-            data["work_update"],            # 8. Work Report
-            data["group_name"],             # 9. Source
-            data["username"],               # 10. Telegram User
-            "📝 Edited" if is_revision else "Original" # 11. Revision
+            data["time"],                   # 7. Submit Time
+            "✅ ON TIME" if (data.get("on_time") == "Yes") else "❌ LATE", # 8. Punctuality
+            data["work_update"],            # 9. Work Report
+            data["group_name"],             # 10. Source
+            data["username"],               # 11. Telegram User
+            "📝 Edited" if is_revision else "Original" # 12. Revision
         ]
         new_rows.append(row)
 
@@ -433,7 +436,7 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
         if len(new_rows) > 1:
             try:
                 last_idx = len(existing) + 1
-                sheet.format(f"A{last_idx}:K{last_idx}", {
+                sheet.format(f"A{last_idx}:L{last_idx}", {
                     "backgroundColor": {"red": 0.95, "green": 0.95, "blue": 0.95},
                     "textFormat": {"bold": True, "italic": True, "foregroundColor": {"red": 0.2, "green": 0.2, "blue": 0.2}},
                     "horizontalAlignment": "CENTER",
@@ -450,7 +453,7 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
             att_sr = len(att_existing) if att_existing else 1
             att_row = [
                 att_sr, data["emp_id"], data["department"], data["emp_name"],
-                data["date"], data["day"],
+                data["date"], data["day"], data["time"],
                 "Present" if on_time else "Late",
                 data["work_update"], data["group_name"],
             ]
@@ -499,8 +502,9 @@ def _update_google_sheets_summaries(spreadsheet, month_name):
             continue
         emp_id = row[4].strip().upper() if len(row) > 4 and row[4] else "" # ID is at index 4
         date = row[1].strip() if len(row) > 1 and row[1] else "" # Date is at index 1
-        work = row[7].strip() if len(row) > 7 and row[7] else "" # Work is at index 7
-        on_time_val = row[6].strip() if len(row) > 6 and row[6] else "" # Punctuality is index 6
+        time_str = row[6].strip() if len(row) > 6 and row[6] else "" # Time is index 6
+        work = row[8].strip() if len(row) > 8 and row[8] else "" # Work is at index 8
+        on_time_val = row[7].strip() if len(row) > 7 and row[7] else "" # Punctuality is index 7
         dept = row[5].strip() if len(row) > 5 and row[5] else "" # Dept is index 5
 
         if not emp_id or not date or emp_id not in config.STAFF_RECORDS:
@@ -509,7 +513,7 @@ def _update_google_sheets_summaries(spreadsheet, month_name):
         # Daily data
         if date not in daily_data:
             daily_data[date] = {}
-        daily_data[date][emp_id] = {"work": work, "on_time": on_time_val}
+        daily_data[date][emp_id] = {"time": time_str, "work": work, "on_time": on_time_val}
 
         # Monthly per-employee
         if emp_id not in emp_monthly:
@@ -694,10 +698,11 @@ def _update_row_in_google_sheets_sync(data: dict) -> bool:
 
             for row_idx, row in enumerate(all_rows):
                 if len(row) >= 5 and row[4] == emp_id and row[1] == target_date:
-                    # Found the row — update Work Update (col 8), Punctuality (col 7)
+                    # Found the row — update Time (col 7), Punctuality (col 8), Work Update (col 9)
                     actual_row = row_idx + 1  # 1-indexed
-                    sheet.update_cell(actual_row, 7, "✅ ON TIME" if on_time else "❌ LATE")
-                    sheet.update_cell(actual_row, 8, data["work_update"])
+                    sheet.update_cell(actual_row, 7, data["time"])
+                    sheet.update_cell(actual_row, 8, "✅ ON TIME" if on_time else "❌ LATE")
+                    sheet.update_cell(actual_row, 9, data["work_update"])
                     logger.info(f"Google Sheets: Updated row {actual_row} in {month_name} for {emp_id}")
                     updated = True
                     break
