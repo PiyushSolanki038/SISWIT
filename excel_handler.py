@@ -16,9 +16,9 @@ SHEET_LOCK = asyncio.Lock()
 
 # ─── Excel Constants ─────────────────────────────────────────────────────────
 HEADERS = [
-    "Sr No", "Employee ID", "Department", "Employee Name",
-    "Telegram Username", "Date", "Day", "Time",
-    "Work Update", "Group Name", "Status", "On Time",
+    "S.No.", "Date", "Day", "Employee Name", "Emp ID", "Department",
+    "Check-in Time", "Punctuality", "Work Report", "Source",
+    "Telegram User", "Revision"
 ]
 
 
@@ -60,7 +60,7 @@ def save_to_excel(data: dict) -> bool:
             next_row = ws.max_row + 1
 
             # Check if new day → insert separator row
-            last_date = ws.cell(row=next_row - 1, column=6).value  # Date column
+            last_date = ws.cell(row=next_row - 1, column=2).value  # Date column (now 2nd)
             current_date = data["date"]
             if last_date and str(last_date) != str(current_date):
                 # Insert a day-separator row
@@ -82,11 +82,20 @@ def save_to_excel(data: dict) -> bool:
             sr_no = 1
 
         # Write data row
+        is_revision = data.get("is_resubmission", False)
         row_data = [
-            sr_no, data["emp_id"], data["department"], data["emp_name"],
-            data["username"], data["date"], data["day"], data["time"],
-            data["work_update"], data["group_name"],
-            "✅ Present", "✅ Yes" if on_time else "❌ Late",
+            sr_no,                          # 1. S.No.
+            data["date"],                   # 2. Date
+            data["day"],                    # 3. Day
+            data["emp_name"],               # 4. Employee Name
+            data["emp_id"],                 # 5. Emp ID
+            data["department"],             # 6. Department
+            data["time"],                   # 7. Check-in Time
+            "✅ ON TIME" if on_time else "❌ LATE", # 8. Punctuality
+            data["work_update"],            # 9. Work Report
+            data["group_name"],             # 10. Source
+            data["username"],               # 11. Telegram User
+            "📝 Edited" if is_revision else "Original" # 12. Revision
         ]
 
         # Styling
@@ -391,23 +400,32 @@ def _save_to_google_sheets_sync(data: dict) -> bool:
         # Check if new day → insert separator row
         if len(existing) > 1:
             last_date = ""
-            # Look for the last non-empty date in column F (index 5)
+            # Look for the last non-empty date in column B (index 1)
             for i in range(len(existing) - 1, 0, -1):
-                if len(existing[i]) > 5 and existing[i][5]:
-                    last_date = existing[i][5]
+                if len(existing[i]) > 1 and existing[i][1]:
+                    last_date = existing[i][1]
                     break
             
             if last_date and last_date != data["date"]:
                 separator = [""] * 12
-                separator[5] = f"─── {data['date']} ───"
+                separator[1] = f"─── {data['date']} ───"
                 new_rows.append(separator)
 
         # Prepare main data row
-        on_time = (data.get("on_time") == "Yes")
+        is_revision = data.get("is_resubmission", False)
         row = [
-            sr_no, data["emp_id"], data["department"], data["emp_name"],
-            data["username"], data["date"], data["day"], data["time"],
-            data["work_update"], data["group_name"], "✅ Present", "✅ Yes" if on_time else "❌ Late"
+            sr_no,                          # 1. S.No.
+            data["date"],                   # 2. Date
+            data["day"],                    # 3. Day
+            data["emp_name"],               # 4. Employee Name
+            data["emp_id"],                 # 5. Emp ID
+            data["department"],             # 6. Department
+            data["time"],                   # 7. Check-in Time
+            "✅ ON TIME" if (data.get("on_time") == "Yes") else "❌ LATE", # 8. Punctuality
+            data["work_update"],            # 9. Work Report
+            data["group_name"],             # 10. Source
+            data["username"],               # 11. Telegram User
+            "📝 Edited" if is_revision else "Original" # 12. Revision
         ]
         new_rows.append(row)
 
